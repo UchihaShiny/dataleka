@@ -66,3 +66,5 @@ Mỗi tối 3 dòng (theo brief): xong gì, vướng gì, mai làm gì. Chi ti�
 - Đích mới theo người dùng: UchihaShiny/dataleka PRIVATE, GitHub CLI chính thức đã xác thực tài khoản UchihaShiny. Giữ nguyên repo/index/origin DataLake.
 - Refine phát hành: ZIP xác định có checksum từng file, quét credential cho mọi nội dung, loại runtime/PII lưu cục bộ, chặn symlink; tên dataleka thống nhất. Publish xác minh SHA main và private visibility. 4 regression offline PASS, gồm push Git bare local và kiểm repo gốc không đổi.
 - Thêm workflow_dispatch kiểm Python, build và browser demo ở môi trường CI riêng; không tự chạy ingestion hoặc deploy. Lần chạy GitHub CI thực tế chưa được kích hoạt.
+
+- **Đã upload:** GitHub xác nhận UchihaShiny/dataleka PRIVATE, main đã push và SHA khớp. 19/19 suite Python PASS; 4 regression phát hành PASS. Chưa kích hoạt workflow CI hoặc deploy cloud.

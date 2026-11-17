@@ -32,3 +32,6 @@ GitHub CLI chính thức đã được xác thực cho tài khoản cá nhân **
 `data/release/dataleka-source.zip` là snapshot nguồn cùng manifest SHA256; không chứa credential, dữ liệu runtime hay saved content. Quy trình ZIP và publish đã có 4 regression offline. Kết quả thật của lần push được CLI in và chỉ coi là thành công khi private visibility và SHA đã được xác minh.
 
 Cloudflare chưa deploy; Dockerfile chưa build do không có Docker, Python Worker chưa port. GitHub Actions chỉ có workflow_dispatch để chạy kiểm tra thủ công, không cron, ingestion hay deploy.
+
+
+Repository đã được tạo và xác minh PRIVATE: https://github.com/UchihaShiny/dataleka . Mã nguồn ứng dụng, tests, dbt, pipelines, tài liệu và cấu hình đã upload. Credential, runtime, nội dung lưu và lịch sử Git của repo ban đầu được giữ cục bộ. Bộ Python cuối đạt 19/19 suite; không dùng kết quả này thay cho kiểm BigQuery/Claude thật. Để phát triển tiếp với cùng lịch sử main đã phát hành, clone repo mới; không force-push lịch sử repo DataLake ban đầu sang repo này.

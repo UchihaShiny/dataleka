@@ -63,3 +63,8 @@ Giới hạn không đổi: chưa chạy Claude/BigQuery thật, chưa chứng m
 
 
 Trong vòng cuối, test fixture sessionStorage từng bị race với lần mount đầu (12 pass/1 fail); đã đưa seed vào addInitScript trước ứng dụng và lặp riêng test này 3 lần đều đạt. Kiểm ảnh mobile còn tìm ra sticky composer che lỗi/retry; đã chuyển composer về luồng trang, cuộn tới sau form và thêm regression kiểm hình học + bấm retry thật trên viewport 390 px. [Ảnh phục hồi chat mobile](qa/ask-recovery-mobile-dark.png), [bộ lọc từ URL trên desktop](qa/explorer-link-desktop-light.png).
+
+
+## Phát hành dataleka
+
+19/19 suite Python PASS, trong đó `test_release.py` có 4 test: loại trừ runtime/saved content, ZIP xác định và credential guard (kể cả shell), symlink, private publish giả lập bằng Git bare kiểm SHA và giữ repo gốc. Log `qa/python-suites-dataleka.txt`, `qa/release-tests.txt`. GitHub CLI thực tế tạo repo UchihaShiny/dataleka PRIVATE và push main; SHA đối chiếu bằng Git remote và GitHub API. CI chỉ manual trigger và chưa chạy trên GitHub; Docker/Cloudflare chưa được kiểm thử hay deploy.
