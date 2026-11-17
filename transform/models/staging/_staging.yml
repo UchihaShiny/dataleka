@@ -1,0 +1,301 @@
+version: 2
+
+models:
+  - name: stg_orders
+    description: "1 dòng = 1 đơn Shopify (kể cả đơn test, đơn huỷ: gold mới quyết định tính đơn nào)."
+    columns:
+      - name: order_id
+        description: "Mã đơn Shopify (gid)."
+        data_tests: [unique, not_null]
+      - name: order_date
+        description: "Ngày tạo đơn theo America/Phoenix."
+        data_tests: [not_null]
+      - name: rev
+        description: "current_total: tổng tiền đơn sau hoàn và sửa đơn. Đây là Rev của brief."
+        data_tests: [not_null]
+      - name: order_name
+        description: "Số đơn hiển thị (#1234)."
+      - name: created_at
+        description: "Lúc tạo đơn (UTC)."
+      - name: updated_at
+        description: "Lúc sửa đơn gần nhất (UTC)."
+      - name: cancelled_at
+        description: "Lúc huỷ (UTC). Null = không huỷ."
+      - name: is_cancelled
+        description: "Đơn đã huỷ."
+      - name: is_test
+        description: "Đơn test. Gold bỏ đơn test."
+      - name: financial_status
+        description: "Trạng thái thanh toán."
+      - name: source_name
+        description: "Kênh tạo đơn."
+      - name: shipping_country
+        description: "Mã nước giao hàng."
+      - name: customer_key
+        description: "sha256 email khách, không phải PII. Null = đơn không email."
+      - name: total_price
+        description: "Tổng tiền lúc đặt, trước hoàn (USD)."
+      - name: total_refunded
+        description: "Tổng đã hoàn (USD)."
+      - name: total_discounts
+        description: "Tổng giảm giá (USD)."
+      - name: total_shipping
+        description: "Phí ship (USD)."
+      - name: total_tax
+        description: "Thuế (USD)."
+
+  - name: stg_line_items
+    description: "1 dòng = 1 dòng sản phẩm trong 1 đơn."
+    columns:
+      - name: line_item_id
+        description: "Mã dòng sản phẩm."
+        data_tests: [unique, not_null]
+      - name: order_id
+        description: "Nối về stg_orders."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_orders')
+                field: order_id
+      - name: sku_prefix
+        description: "3 chữ đầu của SKU, viết hoa. Dùng để ánh xạ dòng sản phẩm (seeds/product_lines.csv)."
+      - name: line_revenue
+        description: "Tiền dòng sau mọi giảm giá (cả mã giảm giá cả giỏ) và sau trả hàng, chưa gồm ship, thuế."
+        data_tests: [not_null]
+      - name: discounted_total
+        description: "Chỉ trừ giảm giá gắn vào dòng. Không dùng làm doanh thu, chỉ để đối chiếu."
+      - name: product_id
+        description: "Mã sản phẩm. Null nếu sản phẩm đã xoá."
+      - name: variant_id
+        description: "Mã biến thể."
+      - name: sku
+        description: "SKU lúc đặt."
+      - name: product_type
+        description: "productType của sản phẩm lúc nạp."
+      - name: name
+        description: "Tên dòng đầy đủ (sản phẩm - biến thể)."
+      - name: title
+        description: "Tên sản phẩm lúc đặt."
+      - name: variant_title
+        description: "Tên biến thể lúc đặt."
+      - name: quantity
+        description: "Số cái lúc đặt."
+      - name: current_quantity
+        description: "Số cái sau trả hàng."
+      - name: unit_price
+        description: "Giá 1 cái trước giảm (USD)."
+      - name: original_total
+        description: "unit_price × quantity (USD)."
+      - name: line_discount
+        description: "Giảm giá gắn vào dòng (USD)."
+      - name: unit_price_after_discounts
+        description: "Giá 1 cái sau mọi giảm giá (USD)."
+      - name: line_gross_after_discounts
+        description: "Sau mọi giảm giá, trước trả hàng (USD)."
+
+  - name: stg_refunds
+    description: "1 dòng = 1 lần hoàn tiền. refund_date là ngày hoàn theo Phoenix, không phải ngày đặt."
+    columns:
+      - name: refund_id
+        description: "Mã lần hoàn."
+        data_tests: [unique, not_null]
+      - name: order_id
+        description: "Đơn được hoàn."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_orders')
+                field: order_id
+      - name: refund_date
+        description: "Ngày hoàn (Phoenix), không phải ngày đặt."
+        data_tests: [not_null]
+      - name: refund_amount
+        description: "Tiền hoàn của lần này (USD)."
+        data_tests: [not_null]
+      - name: created_at
+        description: "Lúc hoàn (UTC)."
+
+  - name: stg_products
+    description: "1 dòng = 1 sản phẩm."
+    columns:
+      - name: product_id
+        description: "Mã sản phẩm Shopify."
+        data_tests: [unique, not_null]
+      - name: title
+        description: "Tên sản phẩm."
+      - name: handle
+        description: "Đường dẫn ngắn trên cửa hàng."
+      - name: product_type
+        description: "productType Shopify."
+      - name: vendor
+        description: "Nhà cung cấp."
+      - name: tags
+        description: "Tag gốc (species:, artist:, pc1:...), gold tách ra cột."
+      - name: status
+        description: "ACTIVE / DRAFT / ARCHIVED."
+      - name: created_at
+        description: "Lúc tạo (UTC)."
+      - name: updated_at
+        description: "Lúc sửa gần nhất (UTC)."
+
+  - name: stg_variants
+    description: "1 dòng = 1 biến thể."
+    columns:
+      - name: variant_id
+        description: "Mã biến thể."
+        data_tests: [unique, not_null]
+      - name: product_id
+        description: "Mã sản phẩm."
+      - name: sku
+        description: "SKU."
+      - name: sku_prefix
+        description: "3 chữ đầu SKU, viết hoa."
+      - name: title
+        description: "Tên biến thể."
+      - name: price
+        description: "Giá hiện tại (USD)."
+      - name: size
+        description: "Lựa chọn Size."
+      - name: type_option_name
+        description: "Interior Weight hoặc Case Type."
+      - name: type_option_value
+        description: "Giá trị lựa chọn loại, gốc."
+      - name: device_model
+        description: "Lựa chọn Model (đời máy)."
+      - name: created_at
+        description: "Lúc tạo (UTC)."
+      - name: updated_at
+        description: "Lúc sửa (UTC)."
+
+  - name: stg_meta_ad_day
+    description: "1 dòng = 1 ngày × 1 ad Meta."
+    data_tests:
+      - unique:
+          column_name: "concat(ad_account_id, '|', cast(date as string), '|', ad_id)"
+    columns:
+      - name: date
+        description: "Ngày theo múi giờ tài khoản (GMT-7 = Phoenix)."
+        data_tests: [not_null]
+      - name: spend
+        description: "Tiền tiêu (USD). Số tin được của Meta."
+        data_tests: [not_null]
+      - name: meta_purchases
+        description: "Lượt mua Meta tự nhận (chỉ action_type = 'purchase'). Không dùng cho MER, CPO."
+      - name: ad_account_id
+        description: "Tài khoản quảng cáo."
+      - name: campaign_id
+        description: "Mã campaign."
+      - name: campaign_name
+        description: "Tên campaign."
+      - name: adset_id
+        description: "Mã ad set."
+      - name: adset_name
+        description: "Tên ad set."
+      - name: ad_id
+        description: "Mã ad."
+      - name: ad_name
+        description: "Tên ad."
+      - name: impressions
+        description: "Lượt hiển thị."
+      - name: clicks
+        description: "Click mọi loại."
+      - name: inline_link_clicks
+        description: "Click vào link."
+      - name: reach
+        description: "Người tiếp cận trong ngày, không cộng qua ngày/ad."
+      - name: meta_view_content
+        description: "Xem sản phẩm, Meta tự nhận."
+      - name: meta_add_to_cart
+        description: "Thêm giỏ, Meta tự nhận."
+      - name: meta_initiate_checkout
+        description: "Bắt đầu thanh toán, Meta tự nhận."
+      - name: meta_purchase_value
+        description: "Giá trị mua Meta tự nhận (USD)."
+
+  - name: stg_meta_ads
+    description: "1 dòng = 1 ad (cây ad). effective_status_now là trạng thái lúc nạp, không phải theo ngày."
+    columns:
+      - name: ad_id
+        description: "Mã ad."
+        data_tests: [unique, not_null]
+      - name: ad_account_id
+        description: "Tài khoản quảng cáo."
+      - name: ad_name
+        description: "Tên ad."
+      - name: adset_id
+        description: "Mã ad set."
+      - name: adset_name
+        description: "Tên ad set."
+      - name: campaign_id
+        description: "Mã campaign."
+      - name: campaign_name
+        description: "Tên campaign."
+      - name: campaign_objective
+        description: "Mục tiêu campaign."
+      - name: creative_id
+        description: "Mã creative."
+      - name: effective_status_now
+        description: "Trạng thái ad LÚC NẠP (hôm nay)."
+      - name: created_time
+        description: "Lúc tạo ad."
+
+  - name: stg_klaviyo_message_daily
+    description: "1 dòng = 1 ngày × 1 message × 1 metric. Thay cho stg_klaviyo_events của brief (không lấy event thô vì có email)."
+    data_tests:
+      - unique:
+          column_name: "concat(cast(date as string), '|', metric, '|', message_id)"
+    columns:
+      - name: date
+        description: "Ngày theo giờ America/Phoenix."
+        data_tests: [not_null]
+      - name: metric
+        description: "received / opened / clicked / placed_order."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['received', 'opened', 'clicked', 'placed_order']
+      - name: message_id
+        description: "Mã message. '(none)' = đơn không gán email."
+      - name: is_attributed
+        description: "Có gán cho email (message_id khác '(none)')."
+      - name: count
+        description: "Số lần đếm của metric."
+      - name: value
+        description: "Doanh thu (USD), chỉ có ở placed_order."
+
+  - name: stg_klaviyo_messages
+    description: "1 dòng = 1 message email, campaign hoặc flow."
+    columns:
+      - name: message_id
+        description: "Mã message."
+        data_tests: [unique, not_null]
+      - name: channel
+        description: "campaign (gửi hàng loạt) / flow (tự động)."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['campaign', 'flow']
+      - name: parent_id
+        description: "Mã campaign hoặc flow."
+      - name: parent_name
+        description: "Tên campaign hoặc flow."
+      - name: message_name
+        description: "Tên message."
+      - name: status
+        description: "Trạng thái campaign/flow."
+
+  - name: int_order_refunds
+    description: "1 dòng = 1 đơn có hoàn tiền: số lần hoàn, tổng tiền, ngày hoàn đầu/cuối. Dùng cho fct_orders."
+    columns:
+      - name: order_id
+        description: "Mã đơn."
+      - name: refund_count
+        description: "Số lần hoàn."
+      - name: refund_amount
+        description: "Tổng tiền hoàn (USD)."
+      - name: first_refund_date
+        description: "Ngày hoàn đầu (Phoenix)."
+      - name: last_refund_date
+        description: "Ngày hoàn cuối (Phoenix)."

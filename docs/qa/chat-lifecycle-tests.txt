@@ -1,0 +1,10 @@
+test_chart_values_are_numeric_or_unknown (__main__.LifecycleTests.test_chart_values_are_numeric_or_unknown) ... ok
+test_cli_cancellation_kills_blocked_process_and_releases_lock (__main__.LifecycleTests.test_cli_cancellation_kills_blocked_process_and_releases_lock) ... ok
+test_close_generator_kills_process (__main__.LifecycleTests.test_close_generator_kills_process) ... ok
+test_disconnecting_response_signals_worker (__main__.LifecycleTests.test_disconnecting_response_signals_worker) ... ok
+test_unexpected_cli_exit_does_not_read_unbounded_stderr (__main__.LifecycleTests.test_unexpected_cli_exit_does_not_read_unbounded_stderr) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.076s
+
+OK

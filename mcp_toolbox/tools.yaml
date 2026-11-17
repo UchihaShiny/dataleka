@@ -1,0 +1,45 @@
+# MCP Toolbox for Databases (Google) cho DataE, tuần 4: Claude tự viết SQL (Text-to-SQL) trên silver + gold.
+# Chạy cạnh server datae (15 tool viết sẵn). Câu đã có tool thì dùng tool; câu lạ mới dùng execute_sql ở đây.
+#
+# 3 lớp chặn, lớp nào cũng đủ để không ghi được:
+#   1. Khoá datae-mcp (GOOGLE_APPLICATION_CREDENTIALS trong .mcp.json): chỉ Job User + Data Viewer silver, gold
+#      (checks/check_mcp_key.py 7/7: raw, pii, tạo bảng đều 403).
+#   2. readOnly + writeMode blocked: Toolbox chỉ cho câu SELECT.
+#   3. allowedDatasets: Toolbox dry run trước, từ chối câu nào chạm dataset ngoài silver, gold.
+# maximumBytesBilled 200 MB/câu như server datae (Sandbox miễn phí 1 TB/tháng). Cấu hình theo docs mcp-toolbox v1.16.
+kind: source
+name: datae-bq
+type: bigquery
+project: ${BIGQUERY_PROJECT}
+location: ${BIGQUERY_LOCATION:US}
+readOnly: true
+writeMode: blocked
+allowedDatasets:
+  - silver
+  - gold
+maximumBytesBilled: 209715200
+maxQueryResultRows: 200
+---
+kind: tool
+name: execute_sql
+type: bigquery-execute-sql
+source: datae-bq
+description: >
+  Chạy 1 câu SELECT (GoogleSQL) trên kho DataE, chỉ dataset silver và gold, project datae-514203.
+  Chỉ dùng khi tool của server datae không trả lời được. Trước khi viết SQL, gọi get_table_info để đọc
+  mô tả bảng/cột (có bẫy). Ngày là ngày kinh doanh America/Phoenix (cột date / order_date). Rev = rev
+  (current_total), MER = sum(rev) / sum(spend) tính từ tổng, không lấy trung bình MER từng ngày. Ưu tiên
+  bảng gold (fct_*, dim_*, mart_*, daily_performance). Ngày trọn cuối của kho = gold.load_status.complete_through
+  (theo lúc nạp; ngày mới nhất có đơn có thể đang dở): hỏi "N ngày qua" thì tính tới ngày đó. Không trả từng customer_key.
+---
+kind: tool
+name: list_table_ids
+type: bigquery-list-table-ids
+source: datae-bq
+description: "Liệt kê bảng trong 1 dataset (silver hoặc gold)."
+---
+kind: tool
+name: get_table_info
+type: bigquery-get-table-info
+source: datae-bq
+description: "Schema và mô tả của 1 bảng (mô tả cột ghi đơn vị, ngày Phoenix, bẫy). Đọc trước khi viết SQL."

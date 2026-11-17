@@ -1,0 +1,6 @@
+option_name,option_value,variant_type,is_heavyweight,note
+Interior Weight,Standard AirKnit,AirKnit,false,hoodie loai thuong
+Interior Weight,Standard Fleece Lining,Fleece,false,hoodie lot ni thuong
+Interior Weight,Heavyweight Fleece Lining,Heavyweight,true,hoodie loai day
+Case Type,Standard,Standard,,op thuong
+Case Type,MagSafe,MagSafe,,op MagSafe (chi iPhone)

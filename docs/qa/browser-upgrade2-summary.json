@@ -1,0 +1,153 @@
+{
+  "environment": "Chromium headless; production build; auto-started FastAPI demo on 8601; disposable save directory; no reuse of live/preview server",
+  "stats": {
+    "startTime": "2026-11-17T09:19:13.356Z",
+    "duration": 43853.018,
+    "expected": 14,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "tests": [
+    {
+      "title": "WCAG A/AA automated checks across every page in both themes",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration_ms": 15646
+        }
+      ]
+    },
+    {
+      "title": "all pages, four viewports, themes, persistence, no page overflow",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration_ms": 15097
+        }
+      ]
+    },
+    {
+      "title": "filters, detail, aggregate export, keyboard and empty results",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration_ms": 755
+        }
+      ]
+    },
+    {
+      "title": "stale responses never replace active page; outage and recovery",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration_ms": 734
+        }
+      ]
+    },
+    {
+      "title": "create, preview, save, edit, reopen, deliberate delete live chart",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration_ms": 1160
+        }
+      ]
+    },
+    {
+      "title": "Ask demo analysis, preview, snapshot save and reopen",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration_ms": 943
+        }
+      ]
+    },
+    {
+      "title": "mobile navigation and reduced motion",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration_ms": 786
+        }
+      ]
+    },
+    {
+      "title": "test backend is explicit isolated demo",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration_ms": 29
+        }
+      ]
+    },
+    {
+      "title": "explorer links preserve filters, ordering and pages through reload and history",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration_ms": 1291
+        }
+      ]
+    },
+    {
+      "title": "late preview cannot authorize an edited spec; cancelling dirty edits is deliberate",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration_ms": 2185
+        }
+      ]
+    },
+    {
+      "title": "Ask can stop a partial stream, retry after outage and keep state across theme changes",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration_ms": 957
+        }
+      ]
+    },
+    {
+      "title": "snapshot waits for every chart preview and preview outage can be retried",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration_ms": 623
+        }
+      ]
+    },
+    {
+      "title": "interrupted chart save recovers without claiming it failed or succeeded",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration_ms": 344
+        }
+      ]
+    },
+    {
+      "title": "mobile composer does not cover the error or retry control",
+      "status": "expected",
+      "results": [
+        {
+          "status": "passed",
+          "duration_ms": 609
+        }
+      ]
+    }
+  ]
+}

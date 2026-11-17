@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "datae": {
+      "command": "python",
+      "args": ["mcp_server/server.py"]
+    },
+    "datae-sql": {
+      "command": "python",
+      "args": ["-m", "mcp_toolbox.run"]
+    }
+  }
+}

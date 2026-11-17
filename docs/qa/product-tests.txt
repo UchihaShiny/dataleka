@@ -1,0 +1,17 @@
+test_forecast_validation_and_staleness (__main__.ProductTests.test_forecast_validation_and_staleness) ... ok
+test_health_unknown_is_unknown (__main__.ProductTests.test_health_unknown_is_unknown) ... ok
+test_independent_arithmetic_and_coherent_aggregates (__main__.ProductTests.test_independent_arithmetic_and_coherent_aggregates) ... ok
+test_malformed_outage_recovery_preserves_content (__main__.ProductTests.test_malformed_outage_recovery_preserves_content) ... ok
+test_missing_days_equal_length_do_not_compare (__main__.ProductTests.test_missing_days_equal_length_do_not_compare) ... ok
+test_new_queries_match_local_model_schemas (__main__.ProductTests.test_new_queries_match_local_model_schemas) ... ok
+test_no_pipeline_fallback (__main__.ProductTests.test_no_pipeline_fallback) ... ok
+test_null_not_zero (__main__.ProductTests.test_null_not_zero) ... ok
+test_phoenix_midnight (__main__.ProductTests.test_phoenix_midnight) ... ok
+test_real_contracts_without_network (__main__.ProductTests.test_real_contracts_without_network) ... ok
+test_refund_fixture_periods_are_additive (__main__.ProductTests.test_refund_fixture_periods_are_additive) ... ok
+test_save_preview_edit_reopen_snapshot_delete (__main__.ProductTests.test_save_preview_edit_reopen_snapshot_delete) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.575s
+
+OK

@@ -1,0 +1,884 @@
+version: 2
+
+# Star schema theo brief tuần 2:
+#   dim:  dim_product, dim_customer
+#   fact: fct_orders (1 đơn), fct_lines (1 dòng sản phẩm), fct_ad_day (1 ngày × 1 ad)
+#   tổng: daily_performance, product_daily, email_daily (dựng từ fact, cho MCP và dashboard)
+
+models:
+  - name: dim_product
+    description: "1 dòng = 1 sản phẩm Shopify, kèm dòng sản phẩm và thuộc tính từ tag (species, theme, artist...)."
+    columns:
+      - name: product_id
+        description: "Mã sản phẩm Shopify (gid). Nối fct_lines.product_id."
+        data_tests: [unique, not_null]
+      - name: product_line
+        description: "productType nếu có; không thì tra tiền tố SKU (seeds/product_lines.csv); không thì '(không rõ)'."
+        data_tests: [not_null]
+      - name: product_url
+        description: "Link trang sản phẩm (store_url/products/handle). Chỉ mở được khi is_live (ACTIVE)."
+      - name: is_live
+        description: "Sản phẩm đang bán (status ACTIVE). DRAFT, ARCHIVED thì link báo 404."
+      - name: brief_line
+        description: "Tên dòng sản phẩm theo tiền tố SKU trong brief (MHL, SSS, AUX, RGO). Để kiểm chéo."
+      - name: product_line_source
+        description: "product_line lấy từ đâu: productType, tiền tố SKU, hoặc không rõ."
+      - name: product_subline
+        description: "Dòng con theo tiền tố SKU (seeds/product_lines.csv): Sun Hoodie, Glass Ornament... Không có tiền tố thì = product_line."
+        data_tests: [not_null]
+      - name: product_subline_source
+        description: "Dòng con lấy từ đâu: tiền tố SKU (brief) / tiền tố SKU (title = suy từ tên) / bằng product_line."
+      - name: species
+        description: "Loài đầu tiên trong tag species:<loài>. species_all liệt kê hết."
+      - name: theme
+        description: "Chủ đề bộ sưu tập từ tag pc1:/orn1:/ls1:<chủ đề>, ví dụ deer-big-game, upland-waterfowl."
+      - name: title
+        description: "Tên sản phẩm hiện tại."
+      - name: handle
+        description: "Đường dẫn ngắn của sản phẩm trên cửa hàng."
+      - name: product_type
+        description: "productType gốc của Shopify (có thể trống; product_line đã xử lý trống)."
+      - name: vendor
+        description: "Nhà cung cấp ghi trên Shopify."
+      - name: status
+        description: "ACTIVE / DRAFT / ARCHIVED lúc nạp."
+      - name: created_at
+        description: "Lúc tạo sản phẩm (UTC)."
+      - name: sku_prefix
+        description: "Tiền tố SKU xuất hiện nhiều nhất trong các biến thể của sản phẩm."
+      - name: species_all
+        description: "Mọi loài trong tag species:, cách nhau dấu phẩy. Một mẫu có thể nhiều loài."
+      - name: artist
+        description: "Hoạ sĩ, từ tag artist:<tên>."
+      - name: gender
+        description: "Giới tính nhắm tới, từ tag gender:<men|women...>."
+      - name: water
+        description: "Nước ngọt / mặn (fresh / salt), từ tag water: (mẫu câu cá)."
+      - name: tags_raw
+        description: "Chuỗi tag gốc Shopify, để tra khi thuộc tính trên trống."
+
+  - name: dim_customer
+    description: "1 dòng = 1 khách theo customer_key (sha256 email, không PII). Từ fct_orders."
+    columns:
+      - name: customer_key
+        description: "sha256 của email khách, không phải PII. Không có tên, email, địa chỉ trong kho phân tích."
+        data_tests: [unique, not_null]
+      - name: orders
+        description: "Số đơn không test (kể cả huỷ)."
+      - name: ltv
+        description: "Tổng rev (current_total, đã trừ hoàn) mọi đơn của khách, tới lần nạp gần nhất."
+      - name: cohort_month
+        description: "Tháng mua đơn đầu tiên (giờ Phoenix)."
+      - name: is_repeat
+        description: "Khách có từ 2 đơn trở lên, bất kể lúc nào (tính dồn, kể cả mua lần 2 ngay trong tháng đầu)."
+      - name: first_order_date
+        description: "Ngày đơn đầu tiên (theo giờ America/Phoenix), kể cả đơn huỷ."
+      - name: last_order_date
+        description: "Ngày đơn gần nhất (theo giờ America/Phoenix), kể cả đơn huỷ."
+      - name: orders_not_cancelled
+        description: "Số đơn không huỷ."
+      - name: avg_order_value
+        description: "ltv / orders (USD mỗi đơn, kể cả đơn huỷ trong mẫu số)."
+      - name: total_refunded
+        description: "Tổng tiền đã hoàn của mọi đơn của khách (USD)."
+      - name: days_first_to_last
+        description: "Số ngày từ đơn đầu tới đơn cuối. 0 = mua 1 lần (hoặc nhiều đơn cùng ngày)."
+
+  - name: fct_orders
+    description: "1 dòng = 1 đơn Shopify không test. Nguồn duy nhất của định nghĩa 'đơn được tính'."
+    columns:
+      - name: order_id
+        description: "Mã đơn Shopify (gid). Khoá chính."
+        data_tests: [unique, not_null]
+      - name: order_date
+        description: "Ngày đặt theo Phoenix."
+        data_tests: [not_null]
+      - name: customer_key
+        description: "Nối dim_customer. Null = đơn không có email."
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_customer')
+                field: customer_key
+              config:
+                where: "customer_key is not null"
+      - name: is_first_order
+        description: "Đơn đầu tiên của khách (theo created_at). Null khi đơn không có email."
+      - name: rev
+        description: "current_total (USD): sau hoàn và sửa đơn."
+        data_tests: [not_null]
+      - name: order_name
+        description: "Số đơn hiển thị (#1234)."
+      - name: created_at
+        description: "Lúc tạo đơn (UTC). Ngày kinh doanh dùng order_date."
+      - name: is_cancelled
+        description: "Đơn đã huỷ. orders vẫn đếm đơn huỷ (khớp đối chiếu); RFM, ABC thì bỏ."
+      - name: financial_status
+        description: "Trạng thái thanh toán Shopify (PAID, REFUNDED, PARTIALLY_REFUNDED...)."
+      - name: source_name
+        description: "Kênh tạo đơn (web, shopify_draft_order...)."
+      - name: shipping_country
+        description: "Mã nước giao hàng."
+      - name: total_price
+        description: "Tổng tiền LÚC ĐẶT (USD), trước hoàn. Gross sales."
+      - name: total_discounts
+        description: "Tổng giảm giá của đơn (USD)."
+      - name: total_shipping
+        description: "Phí ship khách trả (USD)."
+      - name: total_tax
+        description: "Thuế (USD)."
+      - name: total_refunded
+        description: "Tổng đã hoàn của đơn (USD)."
+      - name: refund_count
+        description: "Số lần hoàn của đơn. 0 = chưa hoàn."
+      - name: first_refund_date
+        description: "Ngày hoàn đầu tiên (Phoenix). Null = chưa hoàn."
+      - name: line_count
+        description: "Số dòng sản phẩm trong đơn."
+      - name: units
+        description: "Tổng số cái lúc đặt."
+      - name: current_units
+        description: "Tổng số cái sau trả hàng, sửa đơn."
+
+  - name: fct_lines
+    description: "1 dòng = 1 dòng sản phẩm trong đơn không test."
+    columns:
+      - name: line_item_id
+        description: "Mã dòng sản phẩm. Khoá chính."
+        data_tests: [unique, not_null]
+      - name: order_id
+        description: "Nối fct_orders."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fct_orders')
+                field: order_id
+      - name: product_id
+        description: "Nối dim_product. Sản phẩm đã xoá khỏi Shopify không có trong dim_product (chỉ cảnh báo)."
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_id
+              config:
+                where: "product_id is not null"
+                severity: warn
+      - name: variant_id
+        description: "Nối dim_variant. Biến thể đã xoá khỏi Shopify không có trong dim_variant (chỉ cảnh báo)."
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_variant')
+                field: variant_id
+              config:
+                where: "variant_id is not null"
+                severity: warn
+      - name: variant_type
+        description: "Loại biến thể chuẩn hoá (AirKnit, Fleece, Heavyweight, Standard, MagSafe). Null = sản phẩm không có lựa chọn loại."
+      - name: product_line
+        description: "Nhóm sản phẩm = productType trên dòng (Hoodie, Phone Case, Ornament...); trống thì tra tiền tố SKU; không có thì '(không rõ)'. Dùng làm 'product type' khi hỏi theo type."
+        data_tests: [not_null]
+      - name: line_revenue
+        description: "Tiền dòng (USD) sau mọi giảm giá và trả hàng, chưa ship, thuế."
+        data_tests: [not_null]
+      - name: order_date
+        description: "Ngày đặt đơn (theo giờ America/Phoenix)."
+      - name: customer_key
+        description: "Khách của đơn (sha256 email). Null = đơn không email."
+      - name: sku
+        description: "SKU lúc đặt."
+      - name: sku_prefix
+        description: "3 chữ đầu SKU, dùng tra dòng con."
+      - name: product_subline
+        description: "Dòng con theo tiền tố SKU (Sun Hoodie, Glass Ornament...). Không có thì = product_line."
+      - name: product_title
+        description: "Tên sản phẩm hiện tại; sản phẩm đã xoá thì tên lúc đặt."
+      - name: title_at_order
+        description: "Tên sản phẩm lúc khách đặt."
+      - name: variant_title
+        description: "Tên biến thể lúc đặt."
+      - name: product_url
+        description: "Link sản phẩm. Null nếu sản phẩm đã xoá."
+      - name: size
+        description: "Size của biến thể (từ dim_variant)."
+      - name: is_heavyweight
+        description: "Hoodie loại dày."
+      - name: device_model
+        description: "Đời máy (ốp điện thoại, ốp AirPods)."
+      - name: device_brand
+        description: "iPhone / Samsung / AirPods / khác."
+      - name: quantity
+        description: "Số cái lúc đặt."
+      - name: current_quantity
+        description: "Số cái sau trả hàng, sửa đơn."
+      - name: unit_price
+        description: "Giá 1 cái trước giảm giá (USD)."
+      - name: line_discount
+        description: "Tiền giảm giá gắn vào dòng (USD)."
+      - name: unit_price_after_discounts
+        description: "Giá 1 cái sau mọi giảm giá (USD)."
+      - name: line_gross_after_discounts
+        description: "unit_price_after_discounts × quantity: sau giảm giá, TRƯỚC trả hàng."
+
+  - name: fct_ad_day
+    description: "1 dòng = 1 ngày × 1 ad Meta, kèm creative, objective, tuổi ad. Không cộng reach qua ngày/ad."
+    data_tests:
+      - unique:
+          column_name: "concat(ad_account_id, '|', cast(date as string), '|', ad_id)"
+    columns:
+      - name: campaign_type
+        description: "Phần thứ 2 của tên campaign kiểu mới (Catalog-/Static-), ví dụ Phone Case. Null với tên kiểu cũ."
+      - name: is_typed_name
+        description: "Tên campaign theo kiểu mới '<Format>-<Đích>_<Type>_<Audience>' (bắt đầu Catalog- hoặc Static-)."
+      - name: ad_product_line
+        description: "product_line đọc từ tên campaign qua seeds/campaign_types.csv. '(không theo type)' = tên kiểu cũ; '(chưa gán)' = type mới chưa có trong seed."
+        data_tests: [not_null]   # cảnh báo '(chưa gán)' có spend: tests/ad_type_chua_gan.sql
+      - name: date
+        description: "Ngày theo múi giờ tài khoản Meta (GMT-7, trùng ngày Phoenix)."
+        data_tests: [not_null]
+      - name: ad_id
+        description: "Nối stg_meta_ads. Ad đã xoá không có trong cây ad (chỉ cảnh báo, in_ad_tree = false)."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_meta_ads')
+                field: ad_id
+              config:
+                severity: warn
+      - name: effective_status_now
+        description: "Trạng thái ad HÔM NAY, không phải của ngày này."
+      - name: ad_age_days
+        description: "Số ngày từ khi tạo ad tới ngày này."
+      - name: spend
+        description: "Tiền tiêu (USD). Số Meta tin được. Tổng spend ngày = sum(spend) mọi tài khoản."
+        data_tests: [not_null]
+      - name: ad_account_id
+        description: "Tài khoản quảng cáo Meta (shop có nhiều tài khoản)."
+      - name: campaign_id
+        description: "Mã campaign."
+      - name: campaign_name
+        description: "Tên campaign. Từ 9/2026 theo kiểu '<Format>-<Đích>_<Type>_<Audience>' (xem campaign_type)."
+      - name: adset_id
+        description: "Mã ad set."
+      - name: adset_name
+        description: "Tên ad set."
+      - name: ad_name
+        description: "Tên ad."
+      - name: creative_id
+        description: "Mã creative. Null nếu ad đã xoá."
+      - name: campaign_objective
+        description: "Mục tiêu campaign (OUTCOME_SALES...). Null nếu ad đã xoá."
+      - name: ad_created_date
+        description: "Ngày tạo ad (Phoenix). Null nếu ad đã xoá."
+      - name: in_ad_tree
+        description: "Ad còn trong cây ad Meta. false = ad đã xoá, chỉ còn số liệu."
+      - name: impressions
+        description: "Lượt hiển thị."
+      - name: clicks
+        description: "Click mọi loại."
+      - name: inline_link_clicks
+        description: "Click vào link."
+      - name: reach
+        description: "Số người tiếp cận TRONG NGÀY của ad này. KHÔNG cộng qua ngày hay qua ad (trùng người)."
+      - name: meta_view_content
+        description: "Lượt xem sản phẩm Meta tự nhận."
+      - name: meta_add_to_cart
+        description: "Lượt thêm giỏ Meta tự nhận."
+      - name: meta_initiate_checkout
+        description: "Lượt bắt đầu thanh toán Meta tự nhận."
+      - name: meta_purchases
+        description: "Lượt mua Meta tự nhận. Không dùng cho MER, CPO (đơn thật ở fct_orders)."
+      - name: meta_purchase_value
+        description: "Giá trị mua Meta tự nhận (USD). Chỉ để so trong kênh Meta; ROAS thật dùng mart_type_day."
+
+  - name: load_status
+    description: >
+      1 dòng: kho có số TRỌN tới ngày nào theo giờ Phoenix. Đọc complete_through thay cho tự đoán từ
+      max(order_date): ngày mới nhất trong kho có thể đang dở (nạp lúc 18:00 Phoenix) hoặc đã trọn (nạp sau nửa đêm Phoenix).
+    columns:
+      - name: complete_through
+        description: "Ngày đã trọn cuối (Phoenix). Hỏi 'N ngày qua' thì tính tới ngày này."
+        data_tests: [not_null]
+      - name: latest_order_date
+        description: "Ngày (Phoenix) của đơn mới nhất trong kho. Có thể là ngày đang dở."
+      - name: method
+        description: "'lúc nạp' = theo giờ bắt đầu kéo Shopify (chuẩn); 'đoán từ dữ liệu' = ngày mới nhất có đơn − 1 (máy chưa có data/last_load.json)."
+      - name: built_at
+        description: "Lúc dbt dựng bảng này (UTC)."
+
+  - name: daily_performance
+    description: >
+      1 dòng = 1 ngày kinh doanh theo America/Phoenix. Định nghĩa chỉ số chung cho mọi báo cáo và cho MCP.
+      Dựng từ fct_orders, fct_ad_day, stg_refunds, email_daily. Định nghĩa đang là tạm, chờ context/metrics.md.
+    columns:
+      - name: date
+        description: "Ngày kinh doanh theo giờ Phoenix. Có đủ mọi ngày, ngày không có đơn thì orders = 0."
+        data_tests: [unique, not_null]
+      - name: orders
+        description: "Số đơn Shopify không phải test, kể cả đơn huỷ."
+        data_tests: [not_null]
+      - name: cancelled_orders
+        description: "Số đơn huỷ trong orders."
+      - name: first_orders
+        description: "Số đơn là đơn đầu tiên của khách (khách mới)."
+      - name: rev
+        description: "Tổng current_total (USD) của orders theo ngày đặt: đã trừ hoàn tiền và sửa đơn."
+        data_tests: [not_null]
+      - name: refunds
+        description: "Tiền hoàn (USD) theo ngày HOÀN, không phải ngày đặt."
+      - name: spend
+        description: "Tổng spend Meta (USD) mọi tài khoản. Null = ngày nằm ngoài khoảng kho đã nạp Meta (chưa gom lịch sử hoặc chưa nạp ngày mới), không phải 0."
+      - name: mer
+        description: "rev / spend. Null khi spend null hoặc 0."
+      - name: cpo
+        description: "spend / orders (USD mỗi đơn)."
+      - name: meta_purchases
+        description: "Lượt mua Meta tự nhận (action_type 'purchase'). Chỉ để tham khảo, thường cao hơn đơn thật."
+      - name: meta_roas
+        description: "Giá trị mua Meta tự nhận / spend. Chỉ để tham khảo, không dùng thay MER."
+      - name: email_orders
+        description: "Đơn Klaviyo gán cho email (tự nhận). Chỉ để tham khảo."
+      - name: email_value
+        description: "Doanh thu Klaviyo gán cho email (tự nhận). Chỉ để tham khảo."
+      - name: impressions
+        description: "Lượt hiển thị Meta (cộng mọi ad)."
+      - name: clicks
+        description: "Lượt click Meta mọi loại (cả click vào trang, like...)."
+      - name: link_clicks
+        description: "Click vào link (inline_link_clicks Meta)."
+
+  - name: product_daily
+    description: "1 dòng = 1 ngày (Phoenix) × 1 dòng sản phẩm × 1 dòng con. Dựng từ fct_lines."
+    data_tests:
+      - unique:
+          column_name: "concat(cast(date as string), '|', product_line, '|', product_subline)"
+    columns:
+      - name: date
+        description: "Ngày đặt (theo giờ America/Phoenix)."
+        data_tests: [not_null]
+      - name: product_line
+        description: "Dòng sản phẩm (productType)."
+        data_tests: [not_null]
+      - name: orders
+        description: "Số đơn có ít nhất 1 dòng thuộc dòng sản phẩm này. Cộng qua các dòng sản phẩm sẽ lớn hơn số đơn thật (1 đơn mua nhiều loại)."
+      - name: units
+        description: "Số lượng lúc đặt."
+      - name: current_units
+        description: "Số lượng sau trả hàng, sửa đơn."
+      - name: line_revenue
+        description: "Tiền dòng (USD) sau mọi giảm giá và sau trả hàng, chưa gồm ship, thuế. Luôn nhỏ hơn rev của daily_performance."
+      - name: product_subline
+        description: "Dòng con theo tiền tố SKU."
+
+  - name: email_daily
+    description: "1 dòng = 1 ngày × 1 message email (số Klaviyo). channel: campaign, flow, (không gán), (không rõ)."
+    data_tests:
+      - unique:
+          column_name: "concat(cast(date as string), '|', message_id)"
+    columns:
+      - name: date
+        description: "Ngày theo giờ America/Phoenix."
+        data_tests: [not_null]
+      - name: channel
+        description: "campaign (gửi hàng loạt) / flow (tự động) / '(không gán)' = đơn không gán email / '(không rõ)' = message không có trong danh sách."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['campaign', 'flow', '(không gán)', '(không rõ)']
+      - name: placed_orders
+        description: "Placed Order Klaviyo đếm. Cộng mọi channel = tổng đơn trong ngày (khớp reconcile)."
+      - name: message_id
+        description: "Mã message Klaviyo. '(none)' = đơn không gán cho email nào."
+      - name: parent_id
+        description: "Mã campaign hoặc flow chứa message."
+      - name: parent_name
+        description: "Tên campaign hoặc tên flow."
+      - name: message_name
+        description: "Tên message (1 flow có nhiều message)."
+      - name: received
+        description: "Số email nhận được (Klaviyo đếm)."
+      - name: opened
+        description: "Số lượt mở. Tỉ lệ mở = sum(opened) / sum(received), không lấy trung bình dòng."
+      - name: clicked
+        description: "Số lượt click."
+      - name: placed_value
+        description: "Doanh thu (USD) Klaviyo gán cho message này (Klaviyo tự nhận, attributed). Doanh thu email = tổng placed_value của channel campaign + flow; channel '(không gán)' KHÔNG phải doanh thu email."
+
+  - name: dim_variant
+    description: "1 dòng = 1 biến thể: size, loại (chuẩn hoá qua seeds/variant_types.csv), đời máy, hãng máy."
+    columns:
+      - name: variant_id
+        description: "Mã biến thể Shopify. Khoá chính."
+        data_tests: [unique, not_null]
+      - name: variant_type
+        description: "Null = không có lựa chọn loại; '(chưa ánh xạ)' = giá trị mới chưa có trong seed (test cảnh báo)."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['AirKnit', 'Fleece', 'Heavyweight', 'Standard', 'MagSafe']
+              config:
+                where: "variant_type is not null"
+                severity: warn
+      - name: type_option_value
+        description: "Giá trị gốc của lựa chọn Interior Weight / Case Type, để tra khi lệch."
+      - name: device_brand
+        description: "iPhone, Samsung, AirPods (từ lựa chọn Model). Null với sản phẩm không có Model."
+      - name: product_id
+        description: "Nối dim_product."
+      - name: sku
+        description: "SKU của biến thể."
+      - name: sku_prefix
+        description: "3 chữ đầu SKU, viết hoa (SKU nháp DL… lấy phần 2)."
+      - name: title
+        description: "Tên biến thể, ví dụ 'L / AirKnit'."
+      - name: price
+        description: "Giá bán hiện tại (USD)."
+      - name: size
+        description: "Lựa chọn Size (S, M, L...). Null nếu sản phẩm không có size."
+      - name: type_option_name
+        description: "Tên lựa chọn mang nghĩa loại: Interior Weight (hoodie) hoặc Case Type (ốp)."
+      - name: is_heavyweight
+        description: "Hoodie loại dày (Heavyweight), từ seeds/variant_types.csv."
+      - name: device_model
+        description: "Đời máy (iPhone 16 Pro, Samsung S24...). Chỉ ốp điện thoại và ốp AirPods."
+
+  - name: mart_daily_kpi
+    description: >
+      Tuần 3. 1 dòng = 1 ngày kinh doanh theo America/Phoenix, đúng 7 chỉ số brief: Rev, Orders, AOV,
+      Spend, MER, CPO, CM ước. Rev, orders, spend, mer, cpo lấy nguyên từ daily_performance (không tính lại).
+      Dùng cho cổng khớp số với dashboard/morning.html.
+    columns:
+      - name: date
+        description: "Ngày kinh doanh theo giờ Phoenix. Đủ mọi ngày."
+        data_tests: [unique, not_null]
+      - name: rev
+        description: "Như daily_performance.rev: tổng current_total (USD) theo ngày đặt."
+        data_tests: [not_null]
+      - name: orders
+        description: "Như daily_performance.orders: đơn không test, kể cả huỷ."
+        data_tests: [not_null]
+      - name: aov
+        description: "rev / orders (USD mỗi đơn). Null khi ngày không có đơn."
+      - name: spend
+        description: "Như daily_performance.spend. Null = ngày chưa nạp Meta, không phải 0."
+      - name: mer
+        description: "rev / spend, từ daily_performance."
+      - name: cpo
+        description: "spend / orders, từ daily_performance."
+      - name: cm_est
+        description: "CM ước = rev × (1 − cogs_rate − fee_rate) − spend; tỉ lệ ở vars dbt_project.yml (tạm 28% và 3,8% theo brief). Null khi spend null."
+
+  - name: mart_type_day
+    description: >
+      Tuần 3. 1 dòng = 1 ngày Phoenix × 1 product_line: rev (line_revenue, chưa ship/thuế), spend (theo tên campaign),
+      roas = rev / spend. Cộng spend mọi dòng = spend mart_daily_kpi; cộng rev < rev mart_daily_kpi (thiếu ship, thuế).
+      ROAS theo type chỉ có nghĩa từ 10/2026; trước đó spend nằm ở '(không theo type)'.
+    data_tests:
+      - unique:
+          column_name: "concat(cast(date as string), '|', product_line)"
+    columns:
+      - name: date
+        description: "Ngày theo giờ America/Phoenix."
+        data_tests: [not_null]
+      - name: product_line
+        description: "productType Shopify (như fct_lines.product_line). '(không theo type)' = spend campaign tên kiểu cũ."
+        data_tests: [not_null]
+      - name: rev
+        description: "Tổng line_revenue của dòng sản phẩm (sau giảm giá, trả hàng; chưa ship, thuế)."
+      - name: spend
+        description: "Spend Meta của campaign có type này trong tên. 0 = ngày đó không chạy ads cho type; null = ngoài khoảng đã nạp Meta."
+      - name: roas
+        description: "rev / spend. Null khi spend null hoặc 0. Khác meta_roas (Meta tự nhận): đây là doanh thu Shopify thật."
+
+  - name: mart_cohort_retention
+    description: >
+      Mô hình 1 (Cohort). 1 dòng = 1 cohort (tháng mua đơn đầu, giờ Phoenix) × 1 tháng thứ k (0, 1, 2...).
+      Ô = % khách của cohort có đơn trong tháng thứ k, kèm khoảng tin cậy Wilson 95%. Cohort lấy từ dim_customer.
+      Bẫy: kho chỉ có Shopify từ 11/2024, cohort 2024-11 gồm cả khách cũ mua trước đó; tháng đang chạy is_complete = false.
+    data_tests:
+      - unique:
+          column_name: "concat(cohort_month, '|', cast(month_offset as string))"
+    columns:
+      - name: cohort_month
+        description: "Tháng mua đơn đầu (YYYY-MM), như dim_customer.cohort_month."
+        data_tests: [not_null]
+      - name: month_offset
+        description: "Tháng thứ k kể từ tháng mua đầu. 0 = chính tháng đó."
+        data_tests: [not_null]
+      - name: cohort_size
+        description: "Số khách của cohort (bằng số dòng dim_customer có cohort_month này)."
+        data_tests: [not_null]
+      - name: active_customers
+        description: "Số khách của cohort có ít nhất 1 đơn trong tháng thứ k."
+      - name: retention_pct
+        description: "active_customers / cohort_size × 100. Tháng 0 luôn 100."
+      - name: ci_low
+        description: "Cận dưới khoảng tin cậy Wilson 95% của retention_pct."
+      - name: ci_high
+        description: "Cận trên khoảng tin cậy Wilson 95%. Khoảng rộng = cohort nhỏ, con số giữa chưa đáng tin."
+      - name: is_complete
+        description: "Tháng thứ k đã kết thúc. false = tháng đang chạy, số còn tăng, chưa so với cohort khác được."
+
+  - name: mart_rfm
+    description: >
+      Mô hình 2 (RFM). 1 dòng = 1 khách (customer_key), trạng thái tại as_of_date (ngày dữ liệu mới nhất).
+      R theo ngưỡng hành vi (vars rfm_r_*), F cố định 1 / 2 / 3+, M ngũ phân vị. Chỉ đếm đơn không huỷ.
+      Có customer_key nên MCP chỉ được trả số tổng theo nhóm.
+    columns:
+      - name: customer_key
+        description: "sha256 email. Không trả từng khách qua MCP, chỉ số tổng theo nhóm."
+        data_tests: [unique, not_null]
+      - name: recency_days
+        description: "Số ngày từ đơn không huỷ cuối cùng tới as_of_date."
+        data_tests: [not_null]
+      - name: frequency
+        description: "Số đơn không huỷ."
+      - name: monetary
+        description: "Tổng rev (current_total, đã trừ hoàn) của đơn không huỷ."
+      - name: r_band
+        description: "còn nóng / đang nguội / gần mất / đã mất theo vars rfm_r_hot, rfm_r_cool, rfm_r_lost."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['còn nóng', 'đang nguội', 'gần mất', 'đã mất']
+      - name: f_band
+        description: "1 / 2 / 3+."
+      - name: m_score
+        description: "Ngũ phân vị của monetary, 5 = chi nhiều nhất."
+      - name: segment
+        description: "9 nhóm: Champions, Loyal, Mới quay lại, Cần chú ý, Khách mới, Ngủ đông, Có nguy cơ, Không thể để mất, Đã mất."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['Champions', 'Loyal', 'Mới quay lại', 'Cần chú ý', 'Khách mới', 'Ngủ đông',
+                         'Có nguy cơ', 'Không thể để mất', 'Đã mất']
+      - name: last_order_date
+        description: "Ngày đơn không huỷ cuối cùng (Phoenix)."
+      - name: as_of_date
+        description: "Ngày dữ liệu mới nhất, mốc tính recency."
+
+  - name: mart_cohort_clv
+    description: >
+      Mô hình 3 (CLV cấp 1, lịch sử). 1 dòng = 1 cohort × 1 tháng thứ k. Doanh thu cộng dồn mỗi khách tới hết tháng k:
+      trung bình, trung vị, khoảng tin cậy 95%, bội số so với tháng 0. CLV DOANH THU (chưa trừ giá vốn).
+      Cohort và đơn như mart_cohort_retention. Cohort đủ 12 tháng còn rất nhỏ, CLV 12 tháng chưa đáng tin.
+    data_tests:
+      - unique:
+          column_name: "concat(cohort_month, '|', cast(month_offset as string))"
+    columns:
+      - name: cohort_month
+        description: "Tháng mua đơn đầu (YYYY-MM)."
+        data_tests: [not_null]
+      - name: month_offset
+        description: "Tháng thứ k kể từ tháng mua đầu. 0 = chính tháng đó."
+        data_tests: [not_null]
+      - name: cohort_size
+        description: "Số khách của cohort."
+        data_tests: [not_null]
+      - name: avg_cum_rev
+        description: "Trung bình doanh thu cộng dồn mỗi khách tới hết tháng k (USD, đã trừ hoàn, chưa trừ giá vốn)."
+      - name: median_cum_rev
+        description: "Trung vị doanh thu cộng dồn: khách điển hình. Thường gần giá trị 1 đơn vì phần lớn khách mua 1 lần."
+      - name: ci_low
+        description: "Cận dưới khoảng tin cậy 95% của avg_cum_rev."
+      - name: ci_high
+        description: "Cận trên khoảng tin cậy 95% của avg_cum_rev."
+      - name: first_month_rev
+        description: "avg_cum_rev ở tháng 0."
+      - name: multiple_of_first
+        description: "avg_cum_rev / first_month_rev: CLV gấp bao nhiêu lần tháng đầu."
+      - name: is_complete
+        description: "Tháng k đã kết thúc. false = tháng đang chạy, số còn tăng."
+
+  - name: mart_product_abc
+    description: >
+      Mô hình 5 (Pareto / ABC). 1 dòng = 1 mẫu, cửa sổ abc_window_days (90) ngày tới ngày dữ liệu mới nhất.
+      Tập hợp = mẫu đang mở bán (kể cả 0 cái) cộng mẫu có bán trong cửa sổ. Bỏ đơn huỷ và dòng không phải sản phẩm
+      (Tip, UpCart, Shipping Protection, Gift Card). ABC xếp chỉ trong mẫu đủ tuổi; Mới đứng riêng.
+      abc_class chung, abc_in_line xếp riêng trong từng product_line.
+    columns:
+      - name: product_key
+        description: "product_id dạng chữ; mẫu đã xoá (dòng đơn không còn product_id) thì '(đã xoá) ' + tên lúc đặt."
+        data_tests: [unique, not_null]
+      - name: product_id
+        description: "Null = mẫu đã xoá khỏi Shopify."
+      - name: is_new
+        description: "Mở bán dưới abc_new_days ngày. Xếp hạng (rank_all, cum_share_pct) tính riêng trong nhóm mới / đủ tuổi."
+      - name: revenue
+        description: "Tổng line_revenue trong cửa sổ (sau giảm giá, trả hàng; chưa ship, thuế), bỏ đơn huỷ."
+        data_tests: [not_null]
+      - name: units
+        description: "Số cái bán trong cửa sổ, bỏ đơn huỷ."
+      - name: rev_per_live_day
+        description: "revenue / số ngày mẫu mở bán trong cửa sổ. So mẫu mới với mẫu cũ."
+      - name: share_pct
+        description: "% doanh thu của mẫu trên tổng."
+      - name: cum_share_pct
+        description: "% doanh thu cộng dồn tới mẫu này, TRONG NHÓM TUỔI (đủ tuổi hoặc mới). Mẫu cuối mỗi nhóm = 100."
+      - name: abc_class
+        description: "A (80% doanh thu đầu) / B (80→95%) / C (95→100%) / D (đang mở bán, 0 cái) / Mới (dưới 30 ngày tuổi)."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['A', 'B', 'C', 'D', 'Mới']
+      - name: abc_in_line
+        description: "Như abc_class nhưng xếp riêng trong product_line."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['A', 'B', 'C', 'D', 'Mới']
+      - name: is_live
+        description: "Mẫu đang mở bán (ACTIVE). false = đã ẩn/xoá nhưng có bán trong cửa sổ."
+      - name: age_days
+        description: "Số ngày từ lúc tạo mẫu tới as_of_date. 9999 = mẫu đã xoá, không biết ngày tạo."
+      - name: product_title
+        description: "Tên mẫu."
+      - name: product_line
+        description: "Dòng sản phẩm (productType)."
+      - name: product_subline
+        description: "Dòng con theo tiền tố SKU."
+      - name: theme
+        description: "Chủ đề bộ sưu tập (tag)."
+      - name: species
+        description: "Loài đầu tiên (tag species:)."
+      - name: product_url
+        description: "Link sản phẩm."
+      - name: created_date
+        description: "Ngày tạo mẫu (Phoenix)."
+      - name: as_of_date
+        description: "Ngày đã trọn cuối (macro complete_through, như gold.load_status): cuối cửa sổ."
+      - name: window_start
+        description: "Đầu cửa sổ: as_of_date − 89 ngày."
+      - name: orders
+        description: "Số đơn có mẫu này trong cửa sổ, bỏ đơn huỷ."
+      - name: live_days_in_window
+        description: "Số ngày mẫu đã mở bán trong cửa sổ (tối đa 90)."
+      - name: rank_all
+        description: "Hạng theo revenue, tính riêng trong nhóm mới / đủ tuổi. 1 = cao nhất."
+
+  - name: mart_product_xyz
+    description: >
+      Mô hình 5, phần XYZ. 1 dòng = 1 mẫu đủ tuổi có bán (từ mart_product_abc). Hệ số biến thiên (cv) của doanh thu
+      theo tuần trong 12 tuần trọn: X đều, Y vừa, Z thất thường; '(chưa đủ dữ liệu)' khi quá ít cái hoặc ít tuần.
+      Kèm abc_class để ra 9 ô ABC × XYZ. CẢNH BÁO 12/11: ở cấp mẫu cv phần lớn là nhiễu (mẫu bán 1–2 cái/tuần,
+      chỉ 4 mẫu đạt X); đọc XYZ ở mart_xyz_group.
+    columns:
+      - name: product_key
+        description: "Như mart_product_abc.product_key."
+        data_tests: [unique, not_null]
+      - name: weeks_live
+        description: "Số tuần trọn (trong 12) mẫu đã mở bán. Chỉ các tuần này vào cv."
+      - name: revenue_12w
+        description: "Doanh thu 12 tuần (84 ngày cuối cửa sổ ABC), bỏ đơn huỷ và dòng không phải sản phẩm."
+        data_tests: [not_null]
+      - name: cv
+        description: "Độ lệch chuẩn ÷ trung bình doanh thu tuần. Càng lớn càng thất thường."
+      - name: top_week_share
+        description: "% doanh thu 12 tuần nằm ở tuần bán nhiều nhất. Gần 1 = gần như chỉ bán trong 1 tuần."
+      - name: xyz_class
+        description: "X (cv < 0,5) / Y (0,5–1,0) / Z (> 1,0) / (chưa đủ dữ liệu)."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['X', 'Y', 'Z', '(chưa đủ dữ liệu)']
+      - name: abc_class
+        description: "Nhóm ABC của mẫu (A/B/C; mẫu D và Mới không có trong bảng này)."
+      - name: product_title
+        description: "Tên mẫu."
+      - name: product_line
+        description: "Dòng sản phẩm."
+      - name: product_subline
+        description: "Dòng con."
+      - name: theme
+        description: "Chủ đề bộ sưu tập."
+      - name: species
+        description: "Loài đầu tiên."
+      - name: product_url
+        description: "Link sản phẩm."
+      - name: abc_in_line
+        description: "Nhóm ABC trong product_line."
+      - name: as_of_date
+        description: "Ngày dữ liệu mới nhất."
+      - name: xyz_start
+        description: "Đầu 12 tuần: as_of_date − 83 ngày."
+      - name: weeks_with_sales
+        description: "Số tuần (trong weeks_live) có bán ít nhất 1 cái."
+      - name: units_12w
+        description: "Số cái bán trong 12 tuần."
+      - name: mean_week
+        description: "Doanh thu trung bình mỗi tuần (USD)."
+      - name: sd_week
+        description: "Độ lệch chuẩn doanh thu tuần (USD)."
+
+  - name: mart_xyz_group
+    description: >
+      Mô hình 5, XYZ cấp gộp. 1 dòng = 1 nhóm ở cap_do 'dòng con' (product_subline) hoặc 'biến thể'
+      (product_line · variant_type, chỉ hoodie AUH và ốp TPC). 12 tuần trọn, tính từ lần bán đầu của nhóm.
+      cv doanh thu tuần, noise_cv = mức cv chỉ do may rủi, trend_ratio = 4 tuần cuối ÷ 4 tuần đầu.
+    data_tests:
+      - unique:
+          column_name: "concat(cap_do, '|', nhom)"
+    columns:
+      - name: cap_do
+        description: "'dòng con' (product_subline) hoặc 'biến thể' (product_line · variant_type)."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['dòng con', 'biến thể']
+      - name: nhom
+        description: "Tên nhóm: tên dòng con, hoặc 'Hoodie · AirKnit'..."
+        data_tests: [not_null]
+      - name: first_sale_date
+        description: "Lần bán đầu của nhóm (cả lịch sử). Sau xyz_start = nhóm ra đời trong cửa sổ, tuần đầu bị bỏ."
+      - name: revenue_12w
+        description: "Doanh thu các tuần được tính của nhóm (bỏ tuần chưa trọn của nhóm mới), bỏ đơn huỷ và dòng không phải sản phẩm."
+      - name: cv
+        description: "Độ lệch chuẩn ÷ trung bình doanh thu tuần."
+      - name: noise_cv
+        description: "1 / √(cái trung bình mỗi tuần): cv chỉ do may rủi. cv gần mức này = dao động chủ yếu là ngẫu nhiên."
+      - name: trend_ratio
+        description: "Doanh thu TB 4 tuần cuối ÷ 4 tuần đầu. Khác 1 nhiều = cv cao vì xu hướng (vào/ra mùa), không phải thất thường."
+      - name: xyz_class
+        description: "X (cv < 0,5) / Y (0,5–1,0) / Z (> 1,0) / (chưa đủ dữ liệu) khi < 5 cái/tuần hoặc < 8 tuần."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['X', 'Y', 'Z', '(chưa đủ dữ liệu)']
+      - name: product_line
+        description: "Dòng sản phẩm của nhóm."
+      - name: as_of_date
+        description: "Ngày dữ liệu mới nhất."
+      - name: xyz_start
+        description: "Đầu 12 tuần: as_of_date − 83 ngày."
+      - name: weeks_live
+        description: "Số tuần trọn được tính."
+      - name: units_12w
+        description: "Số cái bán trong các tuần được tính."
+      - name: mean_week_units
+        description: "Số cái trung bình mỗi tuần."
+      - name: mean_week_revenue
+        description: "Doanh thu trung bình mỗi tuần (USD)."
+
+
+  - name: dim_event
+    description: "Lịch sự kiện (seed events) đưa lên gold cho MCP đọc. 1 dòng = 1 ngày có sự kiện."
+    columns:
+      - name: date
+        description: "Ngày có sự kiện (ngày Phoenix)."
+        data_tests: [unique, not_null]
+      - name: event
+        description: "Tên sự kiện: lễ Mỹ, Black Friday, Cyber Monday, Mother's Day..."
+      - name: kind
+        description: "le = ngày lễ / mua_sam = BFCM / tang_qua = ngày tặng quà / sale, campaign = sự kiện riêng của shop (chưa có)."
+      - name: note
+        description: "Ghi chú thêm (có thể trống)."
+
+  - name: mart_anomaly_daily
+    description: >
+      Mô hình 8, phát hiện bất thường. 1 dòng = 1 ngày đã trọn (giờ Phoenix, từ anomaly_start) × 1 trong 9 chỉ số.
+      Kỳ vọng = mức 7 ngày ngay trước × hệ số thứ (trung vị 8 ngày cùng thứ của giá trị ÷ mức lúc đó),
+      độ rộng = max(mức × 1,4826 × MAD hệ số, sàn nhiễu), score = lệch ÷ độ rộng.
+      Doanh thu dùng total_price lúc đặt (gross_sales), không dùng rev.
+    data_tests:
+      - unique:
+          column_name: "concat(cast(date as string), '|', metric)"
+    columns:
+      - name: metric
+        description: "1 trong 9 chỉ số: orders, gross_sales, spend, cpo, mer, new_share, cancel_rate, refunds, email_orders."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['orders', 'gross_sales', 'spend', 'cpo', 'mer', 'new_share', 'cancel_rate', 'refunds', 'email_orders']
+      - name: event
+        description: "Tên sự kiện của ngày (seed events), null nếu ngày thường. Ngày sự kiện vẫn chấm nhưng không làm mốc cho ngày khác."
+      - name: method
+        description: "'nhân theo thứ' (6 chỉ số) hoặc 'TB 28 ngày' (cancel_rate, refunds, email_orders: chỉ số hiếm, ngày 0 nhiều)."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['nhân theo thứ', 'TB 28 ngày']
+      - name: level_7d
+        description: "Trung bình 7 ngày ngay trước (không tính hôm nay): mức hiện tại."
+      - name: level_28d
+        description: "Chỉ số hiếm: trung bình 28 ngày ngay trước, cũng là expected."
+      - name: weekday_factor
+        description: "Trung vị của (giá trị ÷ level_7d) ở 8 ngày cùng thứ trước đó. Mùa vụ tuần kiểu nhân."
+      - name: expected
+        description: "level_7d × weekday_factor: giá trị kỳ vọng hôm đó. Là mốc dự báo ngây thơ mà ETS sau này phải thắng."
+      - name: noise_floor
+        description: "Độ rộng tối thiểu do may rủi (Poisson với số đếm, nhị thức với tỉ lệ, 1 AOV với hoàn, 10% với spend)."
+      - name: score
+        description: "(giá trị − expected) ÷ max(level_7d × 1,4826 × mad_ratio, noise_floor). Dương = cao hơn kỳ vọng."
+      - name: level
+        description: "bình thường / để ý (|score| ≥ 3,5) / cần xử lý (≥ 6, hoặc ≥ 3,5 hai ngày liền cùng chiều) / (không tính được)."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['bình thường', 'để ý', 'cần xử lý', '(không tính được)']
+      - name: date
+        description: "Ngày đã trọn (theo giờ America/Phoenix)."
+      - name: weekday
+        description: "Thứ (Mon, Tue...)."
+      - name: kind
+        description: "Loại chỉ số, quyết định sàn nhiễu: count (đếm), money (tiền), spend, ratio (cpo, mer), share (tỉ lệ), refunds."
+      - name: value
+        description: "Giá trị thật của chỉ số hôm đó."
+      - name: mad_ratio
+        description: "MAD của các tỉ số giá trị ÷ mức ở 8 ngày cùng thứ (độ dao động thường ngày)."
+      - name: scale
+        description: "Độ rộng dùng chia: max(level_7d × 1,4826 × mad_ratio, noise_floor)."
+      - name: pct_vs_expected
+        description: "% chênh so với expected. Dương = cao hơn."
+      - name: direction
+        description: "cao / thấp so với kỳ vọng."
+      - name: n_base
+        description: "Số ngày làm mốc: luôn 8 (nhân theo thứ) hoặc 28 (TB 28 ngày); ngày sự kiện không làm mốc."
+
+  - name: mart_repeat_60d
+    description: >
+      Tuần 4 (câu mẫu 3). 1 dòng = 1 khách có ít nhất 1 đơn không huỷ. Khách có mua lần 2 trong 60 ngày không,
+      theo product type (product_line) của đơn đầu. Tỉ lệ mua lần 2 = countif(repeat_60d) / countif(is_eligible),
+      CHỈ trên khách is_eligible (đơn đầu đủ 60 ngày trước as_of_date); không chia cho mọi khách.
+      Bỏ đơn huỷ (như mart_rfm), nên số khách ít hơn dim_customer một chút. Kho chỉ có Shopify từ 11/2024:
+      khách đơn đầu 11/2024 có thể đã mua trước đó.
+    columns:
+      - name: customer_key
+        description: "sha256 email. Chỉ trả số tổng theo nhóm, không trả từng khách."
+        data_tests: [unique, not_null]
+      - name: first_order_id
+        description: "Đơn không huỷ đầu tiên của khách (theo created_at)."
+      - name: first_order_date
+        description: "Ngày đơn đầu (Phoenix)."
+        data_tests: [not_null]
+      - name: cohort_month
+        description: "Tháng đơn đầu (YYYY-MM). Có thể lệch dim_customer.cohort_month nếu đơn đầu của dim_customer bị huỷ."
+      - name: first_type
+        description: "Product type (product_line) của đơn đầu; nhiều type thì lấy type có doanh thu dòng lớn nhất. '(không rõ)' = đơn đầu chỉ có dòng không phải sản phẩm."
+        data_tests: [not_null]
+      - name: n_types_first_order
+        description: "Số product type khác nhau trong đơn đầu (bỏ Tip, Shipping Protection, Gift Card)."
+      - name: is_multi_type
+        description: "Đơn đầu có từ 2 type trở lên (khách được xếp vào first_type)."
+      - name: has_same_day_extra
+        description: "Có thêm đơn không huỷ cùng ngày đơn đầu. Không tính là mua lần 2 (coi là cùng lần mua)."
+      - name: second_order_date
+        description: "Ngày đơn không huỷ đầu tiên vào NGÀY KHÁC sau đơn đầu (Phoenix). Null = chưa mua lại."
+      - name: days_to_second
+        description: "Số ngày từ đơn đầu tới second_order_date (từ 1). Null = chưa mua lại."
+      - name: as_of_date
+        description: "Ngày đã trọn cuối (ngày đặt mới nhất − 1), mốc tính đủ 60 ngày."
+      - name: is_eligible
+        description: "Đơn đầu ≤ as_of_date − 60 ngày: đã đủ 60 ngày để quan sát. Chỉ khách này vào mẫu số tỉ lệ."
+        data_tests: [not_null]
+      - name: repeat_60d
+        description: "Mua lần 2 trong 1–60 ngày sau đơn đầu. Null khi chưa đủ 60 ngày (is_eligible = false)."

@@ -1,0 +1,33 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dbt-docs",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8080",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "transform/target"
+      ],
+      "port": 8080
+    },
+    {
+      "name": "webapp",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "webapp.api.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8600"
+      ],
+      "port": 8600
+    }
+  ]
+}

@@ -1,0 +1,127 @@
+version: 2
+
+# Bảng raw do dlt nạp (xem docs/raw-tables.md). dbt chỉ đọc, không ghi vào raw.
+# Freshness (brief: dữ liệu mới trong 36 giờ): chạy riêng bằng  python -m pipelines.dbt source freshness
+#   Shopify: theo updated_at của đơn mới nhất.
+#   Meta, Klaviyo: lưu theo ngày, nên một ngày coi như mới tới hết ngày đó theo giờ Phoenix (như check_raw.py).
+sources:
+  - name: raw
+    schema: raw
+    config:
+      freshness:
+        warn_after: {count: 36, period: hour}
+        error_after: {count: 72, period: hour}
+    tables:
+      - name: shopify_orders
+        description: "1 dòng = 1 đơn Shopify. created_at là UTC. Rev = current_total."
+        config:
+          loaded_at_field: updated_at
+        columns:
+          - name: order_id
+            data_tests: [unique, not_null]
+          - name: created_at
+            data_tests: [not_null]
+      - name: shopify_order_line_items
+        description: "1 dòng = 1 dòng sản phẩm trong đơn."
+        config:
+          freshness: null
+        columns:
+          - name: line_item_id
+            data_tests: [unique, not_null]
+          - name: order_id
+            data_tests: [not_null]
+      - name: shopify_order_refunds
+        description: "1 dòng = 1 lần hoàn tiền."
+        config:
+          freshness: null
+        columns:
+          - name: refund_id
+            data_tests: [unique, not_null]
+      - name: shopify_products
+        config:
+          freshness: null
+        columns:
+          - name: product_id
+            data_tests: [unique, not_null]
+      - name: shopify_product_variants
+        config:
+          freshness: null
+        columns:
+          - name: variant_id
+            data_tests: [unique, not_null]
+      - name: meta_ad_insights_daily
+        description: "1 dòng = 1 ngày × 1 ad. date là ngày theo múi giờ tài khoản (GMT-7, trùng Phoenix)."
+        config:
+          loaded_at_field: "timestamp_add(timestamp(date, 'America/Phoenix'), interval 1 day)"
+        data_tests:
+          - unique:
+              column_name: "concat(ad_account_id, '|', cast(date as string), '|', ad_id)"
+        columns:
+          - name: date
+            data_tests: [not_null]
+          - name: ad_id
+            data_tests: [not_null]
+      - name: meta_ads
+        description: "1 dòng = 1 ad (cây ad). Chỉ tài khoản có spend trong các khoảng đã nạp; không có ad đã xoá."
+        config:
+          freshness: null
+        columns:
+          - name: ad_id
+            data_tests: [unique, not_null]
+      - name: klaviyo_message_daily
+        description: "1 dòng = 1 ngày Phoenix × 1 metric × 1 message. message_id '(none)' = đơn không gán email."
+        config:
+          loaded_at_field: "timestamp_add(timestamp(date, 'America/Phoenix'), interval 1 day)"
+        data_tests:
+          - unique:
+              column_name: "concat(cast(date as string), '|', metric, '|', message_id)"
+      - name: klaviyo_campaigns
+        config:
+          freshness: null
+        columns:
+          - name: campaign_id
+            data_tests: [unique, not_null]
+      - name: klaviyo_campaign_messages
+        config:
+          freshness: null
+        columns:
+          - name: message_id
+            data_tests: [unique, not_null]
+      - name: klaviyo_flows
+        config:
+          freshness: null
+        columns:
+          - name: flow_id
+            data_tests: [unique, not_null]
+      - name: klaviyo_flow_messages
+        config:
+          freshness: null
+        columns:
+          - name: message_id
+            data_tests: [unique, not_null]
+
+  # Dự báo (mô hình 8, phần B): KHÔNG do dbt dựng. forecast/publish.py ghi đè mỗi tuần (load job WRITE_TRUNCATE),
+  # dbt chỉ khai báo để có mô tả cột và để metrics.yml trỏ tới. Không có bản dự báo cũ (bảng bị ghi đè).
+  - name: forecast
+    schema: gold
+    tables:
+      - name: forecast_daily
+        description: "1 dòng = 1 ngày trong 14 ngày sau mốc (ngày đã trọn cuối). ETS orders, khoảng 80% đã nới k."
+        columns:
+          - name: date
+          - name: fc
+            description: "Dự báo số đơn (trung bình ETS)."
+          - name: lo
+            description: "Cận dưới khoảng 80% đã nới k. Kiểm ngoài mẫu chỉ phủ ~70%."
+          - name: hi
+            description: "Cận trên khoảng 80% đã nới k."
+          - name: k
+            description: "Hệ số nới khoảng, ước lại từ backtest mỗi lần chạy."
+      - name: forecast_spend_model
+        description: "1 dòng: hệ số hồi quy log(orders) ~ log(spend) + thứ, 56 ngày cuối, cho kịch bản 'nếu chi X USD/ngày'."
+        columns:
+          - name: b_log_spend
+            description: "Spend +1% thì đơn +b%. Dưới 1 = lợi suất giảm dần."
+          - name: spend_min
+            description: "Spend nhỏ nhất trong 56 ngày học. Kịch bản ngoài [spend_min, spend_max] bị từ chối."
+          - name: spend_max

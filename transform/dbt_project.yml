@@ -1,0 +1,64 @@
+# dbt cho DataE: raw (dlt nap) -> silver (staging, view) -> gold (marts, table).
+# BigQuery Sandbox: khong DML, nen chi dung view va table (CREATE OR REPLACE), khong incremental,
+# va khong partition (Sandbox xoa partition cu hon 60 ngay).
+# LUU Y: file nay chi viet ASCII (khong dau). dbt doc rieng file nay bang bang ma Windows (cp1252),
+# chu tieng Viet co dau lam dbt loi UnicodeDecodeError. Ghi chu tieng Viet de trong file .sql/.yml khac.
+name: datae
+version: "1.0.0"
+config-version: 2
+profile: datae
+
+vars:
+  # Ten mien cua hang (thay trong link creative Meta: thedeerly.com/products/<handle>). Dung de dung link san pham.
+  store_url: "https://thedeerly.com"
+  # CM uoc (mart_daily_kpi): cm_est = rev * (1 - cogs_rate - fee_rate) - spend. Ti le TAM theo brief,
+  # thay bang gia von that khi co context/cogs.csv.
+  cogs_rate: 0.28   # gia von (in + san xuat) tren rev
+  fee_rate: 0.038   # phi thanh toan tren rev
+  # RFM (mart_rfm): nguong R theo hanh vi (so ngay tu don cuoi). Kiem bang checks/sql/da-kiem/check_rfm_b1.sql cau 1.
+  rfm_r_hot: 60     # <= 60 ngay: con nong
+  rfm_r_cool: 180   # 61-180: dang nguoi
+  rfm_r_lost: 365   # 181-365: gan mat; > 365: da mat
+  # Pareto / ABC (mart_product_abc)
+  abc_window_days: 90   # cua so tinh doanh thu moi mau
+  abc_a_share: 0.80     # A: nam trong 80% doanh thu dau
+  abc_b_share: 0.95     # B: 80% -> 95%; C: con lai co ban
+  abc_new_days: 30      # mau mo ban duoi 30 ngay: nhom Moi, khong xep A/B/C/D
+  # XYZ (mart_product_xyz): he so bien thien doanh thu tuan, 12 tuan tron
+  xyz_x: 0.5            # cv < 0.5: X (ban deu)
+  xyz_y: 1.0            # 0.5-1.0: Y; > 1.0: Z (that thuong)
+  xyz_min_units: 10     # duoi 10 cai trong 12 tuan: chua du du lieu
+  xyz_min_weeks: 8      # duoi 8 tuan mo ban tron: chua du du lieu
+  xyz_group_min_weekly_units: 5   # mart_xyz_group: duoi 5 cai/tuan (TB) thi cv chu yeu la nhieu (1/sqrt(5) ~ 0.45)
+  # Bat thuong (mart_anomaly_daily, mo hinh 8): ky vong = muc 7 ngay truoc x he so thu (trung vi 8 ngay cung thu), do rong MAD
+  anomaly_start: "2026-03-01"   # bo du lieu truoc diem gay 2/2026 (shop khac quy mo)
+  anomaly_base_weeks: 8         # so ngay cung thu lam moc
+  anomaly_watch: 3.5            # |score| >= 3.5: de y
+  anomaly_act: 6.0              # |score| >= 6, hoac >= 3.5 hai ngay lien tiep cung chieu: can xu ly
+  anomaly_rare_days: 28          # chi so hiem (cancel_rate, refunds, email_orders): so voi TB 28 ngay truoc
+  anomaly_spend_floor: 0.10     # spend la quyet dinh: doi duoi 10% so voi trung vi khong tinh la la
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+target-path: "target"
+clean-targets: ["target"]
+
+models:
+  datae:
+    # Tuan 4: day mo ta bang/cot trong .yml len BigQuery, de MCP Toolbox / AI doc duoc schema
+    +persist_docs: {relation: true, columns: true}
+    staging:
+      +schema: silver
+      +materialized: view
+    intermediate:   # buoc noi trung gian, dung lai cho nhieu bang gold
+      +schema: silver
+      +materialized: view
+    marts:
+      +schema: gold
+      +materialized: table
+
+seeds:
+  datae:
+    +persist_docs: {relation: true, columns: true}
+    +schema: silver   # bang tra cuu nho (anh xa tien to SKU), nam canh silver

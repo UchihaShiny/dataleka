@@ -1,0 +1,10 @@
+dlt[bigquery]==1.32.0
+dbt-core==1.12.6
+dbt-bigquery==1.12.2
+google-cloud-bigquery==3.47.0
+mcp==2.3.0
+python-dotenv
+requests
+statsmodels==0.15.0
+fastapi==0.115.14
+uvicorn==0.32.1

@@ -1,0 +1,357 @@
+# Chỉ số chung của DEERLY Data Lake (tuần 3). MỖI CHỈ SỐ MỘT ĐỊNH NGHĨA, mọi báo cáo, dashboard, MCP đọc file này.
+#
+# Mỗi chỉ số có:
+#   label    : tên hiển thị
+#   formula  : công thức, viết bằng chữ
+#   source   : bảng.cột trong BigQuery nơi chỉ số đã tính sẵn (test kiểm cột này có thật trong _marts.yml)
+#   grain    : 1 dòng của bảng nguồn là gì
+#   sum_rule : cộng nhiều ngày thế nào. "cộng" = sum cột được; "từ tổng" = KHÔNG lấy trung bình cột, phải
+#              cộng tử và mẫu riêng rồi chia (ví dụ MER tuần = tổng rev / tổng spend)
+#   traps    : bẫy hay gặp, ai dùng số này cũng phải biết
+#
+# Trạng thái: TẠM (12/11/2026). Chờ context/metrics.md và cogs.csv của anh Quang ở cổng khớp số.
+# Quy ước chung cho mọi chỉ số:
+#   - Ngày = ngày kinh doanh theo giờ America/Phoenix (không phải giờ Việt Nam, không phải UTC).
+#   - Đơn và tiền bán lấy từ Shopify. Meta chỉ cho spend. Số Meta tự nhận (meta_purchases, meta_roas) thổi ~1,6×.
+#   - Bỏ đơn test. Null nghĩa là CHƯA BIẾT (ví dụ chưa nạp Meta), khác 0.
+
+status: tam
+updated: "2026-11-12"
+timezone: America/Phoenix
+
+metrics:
+  rev:
+    label: Doanh thu (Rev)
+    formula: tổng current_total của đơn Shopify không test, theo ngày ĐẶT
+    source: mart_daily_kpi.rev
+    grain: 1 ngày
+    sum_rule: cộng
+    traps:
+      - current_total đã trừ hoàn tiền và sửa đơn, nên rev của ngày cũ GIẢM DẦN khi khách hoàn. So với dashboard chụp lúc khác sẽ lệch.
+      - Gồm ship và thuế. Rev theo type (rev_type) không gồm, nên cộng rev_type nhỏ hơn rev (~7,5%).
+      - Tiền hoàn theo ngày HOÀN nằm riêng ở daily_performance.refunds; không trừ lần nữa.
+
+  orders:
+    label: Số đơn
+    formula: số đơn Shopify không test, theo ngày đặt
+    source: mart_daily_kpi.orders
+    grain: 1 ngày
+    sum_rule: cộng
+    traps:
+      - ĐANG TÍNH CẢ ĐƠN HUỶ (khớp 815 đơn 1–7/11 đã đối chiếu). Nếu morning.html bỏ đơn huỷ thì lệch đúng bằng cancelled_orders.
+      - Không dùng meta_purchases thay số đơn.
+
+  aov:
+    label: Giá trị trung bình đơn (AOV)
+    formula: rev / orders
+    source: mart_daily_kpi.aov
+    grain: 1 ngày
+    sum_rule: từ tổng (tổng rev / tổng orders)
+    traps:
+      - Vì orders tính cả đơn huỷ (rev ~0), AOV thấp hơn một chút so với cách bỏ đơn huỷ.
+
+  spend:
+    label: Chi phí quảng cáo (Spend)
+    formula: tổng spend Meta mọi tài khoản quảng cáo
+    source: mart_daily_kpi.spend
+    grain: 1 ngày
+    sum_rule: cộng
+    traps:
+      - Null = ngày chưa nạp Meta (thường là hôm nay, hôm qua), KHÔNG phải 0.
+      - Meta còn chỉnh spend vài ngày gần đây (lệch cỡ vài chục cent); chỉ so ngày đã đóng.
+      - Chỉ có Meta. Chưa có Google, TikTok.
+
+  mer:
+    label: MER (Marketing Efficiency Ratio)
+    formula: rev / spend
+    source: mart_daily_kpi.mer
+    grain: 1 ngày
+    sum_rule: từ tổng (tổng rev / tổng spend), không lấy trung bình MER từng ngày
+    traps:
+      - Dùng rev Shopify, không dùng doanh thu Meta tự nhận (meta_roas thổi ~1,6×).
+      - Gồm cả đơn tự nhiên và email, nên MER là hiệu quả chung của cả shop, không riêng ads.
+      - Hoà vốn theo tỉ lệ tạm ≈ 1 / (1 − 0,28 − 0,038) ≈ 1,47. Dưới mức này CM ước âm.
+
+  cpo:
+    label: Chi phí mỗi đơn (CPO)
+    formula: spend / orders
+    source: mart_daily_kpi.cpo
+    grain: 1 ngày
+    sum_rule: từ tổng (tổng spend / tổng orders)
+    traps:
+      - orders đang tính cả đơn huỷ, nên CPO thấp hơn một chút.
+
+  cm_est:
+    label: Lợi nhuận góp ước tính (CM ước)
+    formula: rev × (1 − cogs_rate − fee_rate) − spend; cogs_rate 0,28, fee_rate 0,038 (vars trong dbt_project.yml)
+    source: mart_daily_kpi.cm_est
+    grain: 1 ngày
+    sum_rule: cộng
+    traps:
+      - Tỉ lệ giá vốn 28% là TẠM theo brief, giống nhau mọi sản phẩm. Thật ra mỗi dòng (ornament, ốp, áo) giá vốn khác nhau; chờ cogs.csv.
+      - Chưa trừ ship thực trả, hoàn tiền theo ngày hoàn, chi phí cố định. Đây là CM ước, không phải lãi ròng.
+      - Null khi spend null (chưa biết chi phí thì không biết lãi).
+
+  rev_type:
+    label: Doanh thu theo product type
+    formula: tổng line_revenue của dòng sản phẩm thuộc product_line, theo ngày đặt
+    source: mart_type_day.rev
+    grain: 1 ngày × 1 product_line
+    sum_rule: cộng
+    traps:
+      - Sau giảm giá, trả hàng; CHƯA gồm ship, thuế. Không so trực tiếp với rev.
+      - product_line = productType Shopify (Sun Hoodie nằm trong Long Sleeve).
+
+  spend_type:
+    label: Spend theo product type
+    formula: spend Meta của campaign có type trong tên (kiểu tên Catalog-/Static-, tra seeds/campaign_types.csv)
+    source: mart_type_day.spend
+    grain: 1 ngày × 1 product_line
+    sum_rule: cộng
+    traps:
+      - Chỉ chia được từ 10/2026 (98,8% spend). 1–9/2026 gần như toàn bộ ở '(không theo type)' vì tên campaign kiểu cũ.
+      - 0 = ngày đó không chạy ads cho type; null = chưa nạp Meta.
+
+  roas_type:
+    label: ROAS theo product type
+    formula: rev_type / spend_type
+    source: mart_type_day.roas
+    grain: 1 ngày × 1 product_line
+    sum_rule: từ tổng (tổng rev_type / tổng spend_type)
+    traps:
+      - Gán TOÀN BỘ doanh thu của type cho ads của type đó, kể cả đơn tự nhiên, email. Type spend nhỏ thì ROAS cao giả (Short Sleeve 5,97 tuần 4–10/11).
+      - Mua chéo (bấm ad Phone Case, mua Long Sleeve) bị tính sang type khác.
+      - Dùng để thấy chỗ cần xem kỹ, không để kết luận cắt hay tăng ngân sách.
+      - Khác meta_roas (Meta tự nhận theo pixel).
+
+  # Mô hình 1: Cohort (12/11). Hai chỉ số "quay lại" khác nhau, đừng lẫn.
+  retention_pct:
+    label: Tỉ lệ giữ khách theo tháng (cohort)
+    formula: số khách của cohort có ít nhất 1 đơn trong tháng thứ k / số khách của cohort × 100
+    source: mart_cohort_retention.retention_pct
+    grain: 1 cohort (tháng mua đầu) × 1 tháng thứ k
+    sum_rule: từ tổng (gộp nhiều cohort = tổng active_customers / tổng cohort_size của cùng tháng thứ k), không lấy trung bình %
+    traps:
+      - Tháng k = tháng LỊCH thứ k sau tháng mua đầu (cohort 2026-06 thì k=1 là tháng 7), không phải "trong 30 ngày". Mua 30/6 quay lại 1/7 là tháng 1, mua 1/6 quay lại 30/6 vẫn là tháng 0.
+      - Đếm TỪNG THÁNG RIÊNG, không cộng dồn. Không cộng các tháng lại để ra "% quay lại" (1 khách mua ở nhiều tháng bị đếm nhiều lần).
+      - Tháng 0 luôn 100%; khách mua lần 2 ngay trong tháng đầu KHÔNG hiện trong bảng này (xem repeat_rate).
+      - Cohort dưới ~100 khách (1/2026 có 4, 2/2026 có 15) thì tỉ lệ chưa đáng tin; gộp theo quý. Tool MCP gắn cờ small_cohort.
+      - Cohort nhỏ thì xem khoảng Wilson ci_low–ci_high. Hai cohort có khoảng chồng nhau thì chưa nói được cohort nào tốt hơn (tháng 1 của 6–9/2026 là 6,9–8,9% nhưng khoảng chồng nhau).
+      - is_complete = false (tháng đang chạy) thì số còn tăng; các ô này nằm cùng một đường chéo, đừng đọc là khách bỏ đi.
+      - Kho có Shopify từ 11/2024, nên cohort 2024-11 gồm cả khách cũ mua trước đó, không phải khách mới.
+
+  repeat_rate:
+    label: Tỉ lệ khách quay lại (tính dồn)
+    formula: số khách có từ 2 đơn trở lên / số khách × 100
+    source: dim_customer.is_repeat
+    grain: 1 khách (gộp theo cohort hoặc cả shop)
+    sum_rule: từ tổng (countif(is_repeat) / count(*)), không lấy trung bình % các cohort
+    traps:
+      - Tính dồn tới lần nạp gần nhất, kể cả mua lần 2 ngay trong tháng đầu. Luôn LỚN HƠN retention_pct của từng tháng (cohort 6/2026 là 19,3%, trong khi tháng 1 chỉ 7,3%).
+      - Cohort càng mới càng ít thời gian mua lại, nên thấp hơn là bình thường; không so thẳng cohort mới với cohort cũ.
+      - Đơn tính cả đơn huỷ (giống orders), nên một khách đặt rồi huỷ rồi đặt lại cũng là "quay lại".
+
+  # Mô hình 2: RFM (12/11). Ảnh chụp từng khách tại as_of_date; chỉ đếm đơn KHÔNG HUỶ (khác dim_customer).
+  rfm_recency:
+    label: R (số ngày từ đơn cuối)
+    formula: as_of_date − ngày đơn không huỷ cuối cùng; r_band theo ngưỡng 60 / 180 / 365 ngày (vars rfm_r_hot, rfm_r_cool, rfm_r_lost)
+    source: mart_rfm.recency_days
+    grain: 1 khách
+    sum_rule: từ tổng (gộp nhóm thì lấy trung bình hoặc trung vị số ngày của các khách trong nhóm, không cộng)
+    traps:
+      - Ngưỡng theo hành vi thật (12/11, 1.288 khách có đơn 2) với p50 17 ngày, p90 78 ngày, 83,9% quay lại trong 60 ngày, 99,3% trong 180 ngày.
+      - Các số trên bị thiên về phía ngắn vì shop còn trẻ (phần lớn khách có từ 4/2026, khách mới chưa có thời gian quay lại muộn). Kiểm lại ngưỡng sau 3–6 tháng bằng checks/sql/da-kiem/check_rfm_b1.sql câu 1.
+      - as_of_date là ngày dữ liệu mới nhất, có thể là ngày Phoenix chưa trọn.
+
+  rfm_frequency:
+    label: F (số lần mua)
+    formula: số đơn không huỷ của khách; f_band 1 / 2 / 3+
+    source: mart_rfm.frequency
+    grain: 1 khách
+    sum_rule: từ tổng (trung bình = tổng đơn / tổng khách của nhóm)
+    traps:
+      - Ngưỡng cố định, không ngũ phân vị, vì 84% khách chỉ mua 1 lần (ngũ phân vị cho 4 mức cùng là 1 đơn).
+      - Không tính đơn huỷ, nên nhỏ hơn hoặc bằng dim_customer.orders. Khách chỉ có đơn huỷ không có trong mart_rfm.
+
+  rfm_monetary:
+    label: M (tổng tiền đã chi)
+    formula: tổng rev (current_total, đã trừ hoàn) các đơn không huỷ; m_score ngũ phân vị 1–5
+    source: mart_rfm.monetary
+    grain: 1 khách
+    sum_rule: cộng
+    traps:
+      - m_score 5 là top 20% khách (khoảng 1.870 người), không phải vài khách lớn nhất. Một đơn khoảng 118 USD đã đủ vào top 20%.
+      - Là doanh thu (gồm ship, thuế), không phải lợi nhuận.
+
+  rfm_segment:
+    label: Nhóm khách RFM
+    formula: 9 nhóm theo thứ tự luật (luật trên thắng) Đã mất, Không thể để mất, Có nguy cơ, Champions, Loyal, Mới quay lại, Cần chú ý, Khách mới, Ngủ đông
+    source: mart_rfm.segment
+    grain: 1 khách
+    sum_rule: cộng (đếm khách theo nhóm)
+    traps:
+      - Là ảnh chụp tại as_of_date. Mỗi lần nạp dữ liệu mới, khách có thể đổi nhóm (Khách mới sau 60 ngày không mua thành Ngủ đông).
+      - Khách mới luôn tách riêng. Không so Khách mới với khách cũ, vì khách mới chưa thể có F cao.
+      - Không thể để mất (12/11 có 98 khách) phần lớn là khách 1 đơn to (F trung bình 1,36), vì m_score 5 là top 20%. Không đọc là fan lâu năm đang bỏ đi.
+      - Có nguy cơ rất ít (12/11 có 10 khách) vì shop chưa đủ lâu để có nhiều khách mua 2 lần rồi im hơn 180 ngày, không phải vì khách tốt không bỏ đi.
+      - Đã backtest 12/11 (checks/sql/da-kiem/check_rfm_backtest.sql, chia nhóm tại 1/7 và 1/8/2026 rồi xem 90 ngày sau). % mua lại trong 90 ngày ở mốc 1/7 và 1/8 là Champions 32,5 và 37,3; Mới quay lại 18,7 và 20,4; Khách mới 9,4 và 9,4; Ngủ đông 4,0 và 4,1; Đã mất 1,4 và 2,1. Thứ tự giống nhau ở 2 mốc, nên chia nhóm dự đoán được thật.
+      - Champions, Mới quay lại, Khách mới, Ngủ đông tách nhau thật (khoảng Wilson không chồng ở mốc 1/8). Ngủ đông và Đã mất CHƯA tách được (khoảng chồng nhau).
+      - Loyal, Cần chú ý, Không thể để mất, Có nguy cơ quá ít khách ở các mốc (0 đến 63) nên CHƯA kiểm được. Không trình bày thứ hạng của 4 nhóm này như đã chứng minh.
+      - Ngủ đông tự mua lại khoảng 4% trong 90 ngày (khoảng 1%/tháng) khi chưa có winback. Chiến dịch winback chỉ được tính phần vượt trên mức này. Không dùng retention_pct của cohort (2–4%/tháng) cho nhóm này, vì cohort gồm cả khách mua nhiều lần.
+
+  # Mô hình 3: CLV cấp 1, lịch sử (12/11). Cấp 3 (dự đoán BG/NBD) HOÃN tới sau 2/2027, chưa đủ dữ liệu để kiểm chứng.
+  clv_hist:
+    label: CLV lịch sử (doanh thu cộng dồn mỗi khách)
+    formula: tổng rev các đơn của khách trong cohort từ tháng 0 tới hết tháng thứ k, chia số khách của cohort
+    source: mart_cohort_clv.avg_cum_rev
+    grain: 1 cohort (tháng mua đầu) × 1 tháng thứ k
+    sum_rule: từ tổng (gộp nhiều cohort = tổng doanh thu cộng dồn / tổng số khách, cùng mốc k), không lấy trung bình các cohort
+    traps:
+      - Là CLV DOANH THU, chưa trừ giá vốn, ship, phí. CLV lợi nhuận thấp hơn nhiều; không dùng thẳng làm mức CAC tối đa.
+      - Là số đã xảy ra, không phải dự đoán. Cohort mới chỉ có vài tháng nên CLV của nó còn tăng (xem is_complete).
+      - CLV 12 tháng chưa đo đáng tin. Cohort đủ 12 tháng chỉ khoảng 144 khách (11/2024 có 52, 12/2024 có 74, 2025 lẻ tẻ) và không có cohort 8–12/2025. Đọc ở mốc cohort lớn (từ 4/2026) đã có, hiện tối đa 6 tháng.
+      - Cohort mới chưa đủ tuổi thì không so CLV cùng mốc k với cohort cũ khi khoảng tin cậy chồng nhau (tháng 5 của 4/2026 và 5/2026 chồng nhau).
+
+  clv_median:
+    label: CLV trung vị (khách điển hình)
+    formula: trung vị doanh thu cộng dồn mỗi khách của cohort tới hết tháng thứ k
+    source: mart_cohort_clv.median_cum_rev
+    grain: 1 cohort × 1 tháng thứ k
+    sum_rule: từ tổng (không cộng hay lấy trung bình trung vị của nhiều cohort; muốn gộp thì tính lại trung vị trên khách)
+    traps:
+      - 12/11 trung vị đứng yên khoảng 46 USD ở hầu hết ô, nghĩa là khách điển hình chỉ mua 1 đơn khoảng 46 USD. Trung bình (61–83) cao hơn vì vài khách mua nhiều.
+      - Báo cáo CLV luôn kèm trung vị. Chỉ nói trung bình sẽ làm khách điển hình trông giá trị hơn thật.
+
+  clv_multiple:
+    label: Bội số CLV so với tháng đầu
+    formula: avg_cum_rev tháng k / avg_cum_rev tháng 0
+    source: mart_cohort_clv.multiple_of_first
+    grain: 1 cohort × 1 tháng thứ k
+    sum_rule: từ tổng (gộp nhiều cohort = tổng doanh thu tới k / tổng doanh thu tháng 0)
+    traps:
+      - 12/11 sau 5 tháng chỉ ×1,16 (cohort 4/2026) tới ×1,24 (5/2026), đúng hướng 1,1–1,3 ở 12 tháng như bài học dự đoán. Kết luận là đơn đầu phải tự có lời, phần mua lại chỉ thêm khoảng 20% sau nửa năm.
+      - Tháng 0 gồm mọi đơn trong tháng mua đầu (kể cả mua 2 lần ngay tháng đó), không chỉ đơn đầu.
+
+  # Mô hình 5: Pareto / ABC (12/11). Đơn vị mẫu, cửa sổ 90 ngày, tính cả mẫu bán 0 cái. Mẫu Mới (dưới 30 ngày) đứng riêng.
+  abc_class:
+    label: Nhóm ABC của mẫu
+    formula: xếp mẫu đủ tuổi theo doanh thu 90 ngày giảm dần; A trong 80% doanh thu đầu, B 80–95%, C 95–100%, D đang mở bán mà 0 cái, Mới dưới 30 ngày tuổi
+    source: mart_product_abc.abc_class
+    grain: 1 mẫu (product_key), cửa sổ 90 ngày tới ngày dữ liệu mới nhất
+    sum_rule: cộng (đếm mẫu, cộng doanh thu theo nhóm)
+    traps:
+      - ABC đo KẾT QUẢ, không đo tiềm năng. Mẫu A có thể chỉ là mẫu được chạy ads (vòng lặp tự xác nhận). Chưa nối ad với mẫu nên chưa tách được.
+      - Đã kiểm định 12/11 (checks/sql/da-kiem/check_abc_on_dinh.sql, so 90 ngày trước với 90 ngày này). A kỳ trước có 53% vẫn là A, 80% vẫn là A hoặc B, chỉ 7% rơi xuống D. Quyết định từng mẫu được với A, nhưng xem kèm B.
+      - B và C rất nhiễu giữa 2 kỳ (C kỳ trước có 64% sang D hoặc bị ẩn, chỉ 3% lên A). Với mẫu B, C thì quyết định ở cấp chủ đề hoặc loài, không theo từng mẫu.
+      - D (12/11 có 1.021 mẫu, 43% mẫu đủ tuổi) là mẫu chưa bán được trong 90 ngày, có thể là chưa ai nhìn thấy chứ không hẳn là xấu.
+      - Mới (12/11 có 1.819 mẫu, shop đăng 100–270 mẫu mỗi đợt) tách riêng, không xếp A/B/C/D. So mẫu mới bằng rev_per_live_day.
+      - Không so ABC chung giữa các dòng giá khác nhau (Hoodie luôn thắng Ornament về doanh thu). Dùng abc_in_line để xếp riêng trong từng dòng.
+      - Đã bỏ đơn huỷ và dòng không phải sản phẩm (Tip, Gift Card, UpCart). Mẫu đã xoá vẫn tính, khoá bằng tên lúc đặt.
+      - Nhạy với mùa vụ. Cửa sổ 90 ngày vào tháng 11 làm Ornament phình to.
+
+  abc_revenue:
+    label: Doanh thu 90 ngày của mẫu
+    formula: tổng line_revenue (sau giảm giá, trả hàng) của mẫu trong cửa sổ 90 ngày, bỏ đơn huỷ
+    source: mart_product_abc.revenue
+    grain: 1 mẫu, cửa sổ 90 ngày
+    sum_rule: cộng
+    traps:
+      - Chưa gồm ship, thuế, chưa trừ giá vốn. Mẫu A theo doanh thu có thể có biên lãi mỏng.
+      - Tổng mọi mẫu khớp fct_lines cùng cửa sổ trừ đơn huỷ và dòng không phải sản phẩm (12/11 chênh 0).
+
+  abc_concentration:
+    label: Độ tập trung doanh thu theo mẫu (Gini, top-k)
+    formula: Gini trên doanh thu 90 ngày của mẫu đủ tuổi; top-k share = % doanh thu của k% mẫu bán nhiều nhất
+    source: mart_product_abc.share_pct
+    grain: tính trên toàn bộ mẫu đủ tuổi của cửa sổ
+    sum_rule: từ tổng (tính lại trên danh sách mẫu, không cộng hay lấy trung bình Gini)
+    traps:
+      - Phải tính cả mẫu D (0 cái). 12/11 Gini kể cả D là 0,806 (đúng mức POD từ 0,8 trở lên), bỏ D chỉ còn 0,659, trông ít tập trung hơn thật.
+      - Top 10% mẫu đủ tuổi có bán (1.339 mẫu) chiếm 55,2% doanh thu (12/11).
+      - So Gini giữa 2 kỳ chỉ là tín hiệu khi số mẫu khác nhau nhiều (90 ngày trước 552 mẫu có bán, 90 ngày này 1.339).
+
+  # Mô hình 5, phần XYZ (12/11). Đọc ở cấp GỘP (dòng con, biến thể), không đọc ở cấp mẫu.
+  xyz_class:
+    label: Nhóm XYZ (bán đều hay thất thường)
+    formula: cv = độ lệch chuẩn ÷ trung bình doanh thu tuần trong 12 tuần trọn; X dưới 0,5, Y 0,5–1,0, Z trên 1,0; chưa đủ dữ liệu khi dưới 5 cái mỗi tuần hoặc dưới 8 tuần
+    source: mart_xyz_group.xyz_class
+    grain: 1 nhóm ở 1 cấp (dòng con hoặc biến thể), 12 tuần trọn tới ngày dữ liệu mới nhất
+    sum_rule: từ tổng (không gộp nhãn; muốn gộp thì tính lại cv trên doanh thu tuần cộng lại)
+    traps:
+      - Phải đọc kèm trend_ratio. cv cao có thể chỉ vì đang vào mùa (12/11 Performance Hoodie cv 0,93 nhưng tăng đều gấp 8 lần, đúng nghĩa Y mùa vụ), còn X vẫn có thể đang giảm mạnh (Pro Short Sleeve Tee X nhưng trend 0,56).
+      - Không đọc XYZ ở cấp mẫu (mart_product_xyz). Mẫu POD bán 1–2 cái mỗi tuần nên riêng may rủi đã cho cv khoảng 0,7–1 (Poisson, cv ≈ 1 / √ số cái mỗi tuần). 12/11 chỉ 4 mẫu đạt X.
+      - So cv với noise_cv. cv gần noise_cv thì dao động chủ yếu là ngẫu nhiên; ở cấp dòng con noise_cv chỉ 0,05–0,2 nên dao động là thật.
+      - 12 tuần không đủ để chứng minh mùa vụ lặp lại (cần năm trước). Y ở đây là dao động vừa, kèm trend để đoán có phải mùa vụ.
+      - Nhóm ra đời trong cửa sổ bỏ tuần đầu chưa trọn; nhóm mới dưới 8 tuần (12/11 Tough Phone Case, Glass Ornament) chưa có nhãn dù bán rất nhiều.
+      - Biến thể chỉ có ở hoodie AUH (AirKnit, Fleece, Heavyweight) và ốp TPC (MagSafe, Standard).
+
+  xyz_trend:
+    label: Xu hướng 12 tuần của nhóm
+    formula: doanh thu trung bình 4 tuần cuối ÷ 4 tuần đầu của cửa sổ 12 tuần
+    source: mart_xyz_group.trend_ratio
+    grain: 1 nhóm ở 1 cấp, 12 tuần trọn
+    sum_rule: từ tổng (tính lại trên doanh thu tuần cộng lại, không lấy trung bình tỉ số)
+    traps:
+      - Trên 1 là đang tăng, dưới 1 là đang giảm. 12/11 thấy rõ đổi mùa, Performance Hoodie 8,06, Performance Long Sleeve 1,36, Sun Hoodie 0,82, Pro Short Sleeve Tee 0,56.
+      - Null khi nhóm chưa bán ở 4 tuần đầu (ra đời trong cửa sổ). Không đọc null là không đổi.
+      - Chỉ so 2 đầu cửa sổ, một tuần lạ ở đầu hay cuối làm lệch tỉ số. Xem thêm doanh thu từng tuần khi trend quá lớn.
+
+
+  anomaly_expected:
+    label: Giá trị kỳ vọng trong ngày (mô hình 8)
+    formula: chỉ số thường = trung bình 7 ngày ngay trước × hệ số thứ (trung vị của giá trị ÷ mức, 8 ngày cùng thứ trước đó); chỉ số hiếm (cancel_rate, refunds, email_orders) = trung bình 28 ngày ngay trước
+    source: mart_anomaly_daily.expected
+    grain: 1 ngày đã trọn × 1 chỉ số (9 chỉ số), từ 1/3/2026
+    sum_rule: từ tổng (cộng expected của orders, gross_sales, spend, refunds, email_orders được; tỉ lệ thì không cộng)
+    traps:
+      - Đây cũng là mốc dự báo ngây thơ. Dự báo ETS sau này phải thắng được nó mới đáng dùng.
+      - Đổi mức (tăng ngân sách, vào mùa) thì chỉ vài ngày đầu bị báo, sau khoảng 1 tuần mức 7 ngày bắt kịp. Vì vậy tụt từ từ cả tuần (như 10–16/9) bị nuốt vào mức, không bao giờ báo.
+      - Doanh thu là total_price lúc đặt (gross_sales), không phải rev. MER ở đây tính từ gross_sales nên khác mer của daily_performance.
+
+  anomaly_score:
+    label: Điểm lệch so với kỳ vọng
+    formula: (giá trị − expected) ÷ max(1,4826 × MAD, sàn nhiễu); sàn nhiễu là √expected với số đếm, expected ÷ √(đơn kỳ vọng) với tiền và tỉ số, nhị thức với tỉ lệ, 1 AOV với tiền hoàn, 10% với spend
+    source: mart_anomaly_daily.score
+    grain: 1 ngày đã trọn × 1 chỉ số
+    sum_rule: từ tổng (không cộng, không lấy trung bình score nhiều ngày; muốn đánh giá cả tuần thì tính lại trên tổng tuần)
+    traps:
+      - Dương là cao hơn kỳ vọng, âm là thấp hơn. Cao chưa chắc tốt (cpo cao, refunds cao, cancel_rate cao là xấu).
+      - Shop ít đơn thì nhiễu lớn, nên lệch nhiều % vẫn có thể score nhỏ. Ví dụ 14/9 CPO +77% nhưng score chỉ 3,21 khi shop khoảng 25 đơn mỗi ngày.
+      - Luôn kiểm bất thường DỮ LIỆU trước (check_raw, freshness, reconcile). Spend null ngoài khoảng Meta đã nạp thì không có dòng, không phải 0.
+
+  anomaly_level:
+    label: Mức báo động
+    formula: để ý khi |score| ≥ 3,5; cần xử lý khi |score| ≥ 6, hoặc ≥ 3,5 hai ngày liền cùng chiều; (không tính được) khi thiếu mốc hay sàn nhiễu
+    source: mart_anomaly_daily.level
+    grain: 1 ngày đã trọn × 1 chỉ số
+    sum_rule: từ tổng (đếm số ngày có báo, không cộng mức)
+    traps:
+      - Kiểm định 12/11 trên 227 ngày, 11,5% số ngày có ít nhất 1 báo động, 6 ngày cần xử lý, đều giải thích được (10/10 spend gấp đôi, ngày gửi campaign email).
+      - Ngưỡng 3,5 giữ chặt có chủ đích (Huy Anh chốt 12/11) để tránh báo nhầm. Giới hạn đã biết là 14/9 CPO tăng 77% không bị báo.
+      - Có lịch sự kiện (seed events, 13/11) gồm lễ Mỹ, BFCM, ngày tặng quà. Ngày sự kiện vẫn chấm, có cột event, nhưng không làm mốc cho ngày khác. Chưa có ngày sale riêng và ngày gửi campaign email, những ngày đó vẫn bị báo.
+      - Báo ở tổng shop. Không kiểm từng dòng sản phẩm hay từng mẫu (số nhỏ, báo liên tục).
+
+  forecast_orders:
+    label: Dự báo đơn 14 ngày (mô hình 8)
+    formula: ETS (lỗi nhân, xu hướng cộng có hãm, mùa tuần nhân) học 84 ngày cuối; khoảng 80% nới bằng k ước từ backtest
+    source: forecast_daily.fc
+    grain: 1 ngày trong 14 ngày sau ngày đã trọn cuối, lập mỗi tuần
+    sum_rule: cộng (tổng dự báo nhiều ngày; khoảng của tổng KHÔNG phải tổng các khoảng, cộng lo/hi cho khoảng rộng hơn thật)
+    traps:
+      - Backtest 16 mốc (7–10/2026) WAPE 22,9%, thắng mốc ngây thơ 17%. Khoảng 80% kiểm ngoài mẫu chỉ phủ khoảng 70%.
+      - Chỉ 14 ngày (Huy Anh chốt 12/11). Tổng 30 ngày đã kiểm lệch trung bình 24%, tệ nhất 63%, vì phụ thuộc quyết định ngân sách.
+      - Khoảng cho tổng 14 ngày lấy từ lệch TỔNG trong backtest (p80, cột backtest_total_p80_pct), không phải WAPE ngày, không cộng lo/hi.
+      - Chưa có Q4 ở quy mô này. Black Friday, Cyber Monday có thể vượt xa khoảng. Không đoán được cú sốc.
+      - Bảng bị ghi đè mỗi tuần nên không có bản dự báo cũ để chấm lại.
+
+  forecast_spend_elasticity:
+    label: Độ nhạy đơn theo spend
+    formula: hệ số b trong log(orders) = a + b × log(spend) + hệ số thứ, học 56 ngày cuối
+    source: forecast_spend_model.b_log_spend
+    grain: 1 dòng mỗi lần lập dự báo
+    sum_rule: từ tổng (không cộng; là hệ số)
+    traps:
+      - b dưới 1 là lợi suất giảm dần, ví dụ b 0,88 nghĩa là spend +10% thì đơn khoảng +8,8%. Lập 12/11 ra 0,882.
+      - Học từ hiệu quả ads 8 tuần gần nhất. Hiệu quả đổi (như tháng 9) thì kịch bản lệch. Backtest khi biết spend thật WAPE 20,5%.
+      - Chỉ dùng trong khoảng spend đã thấy (spend_min đến spend_max). Ngoài khoảng đó không đưa số.
+      - Đây là tương quan trong 8 tuần, chưa phải tác động nhân quả của ads (mô hình 7 MMM không làm).

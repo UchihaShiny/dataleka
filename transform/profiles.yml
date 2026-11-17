@@ -1,0 +1,15 @@
+# Kết nối BigQuery. Không chứa bí mật: mọi giá trị đọc từ biến môi trường do pipelines/dbt.py nạp từ .env.
+datae:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: service-account
+      project: "{{ env_var('GCP_PROJECT_ID') }}"
+      keyfile: "{{ env_var('DATAE_KEYFILE') }}"  # đường dẫn tuyệt đối, pipelines/dbt.py tự đổi
+      location: "{{ env_var('BQ_LOCATION', 'US') }}"
+      dataset: silver  # dataset mặc định; model nào cũng ghi rõ silver/gold trong dbt_project.yml
+      threads: 4
+      job_execution_timeout_seconds: 300
+      # Mỗi truy vấn quét tối đa 1 GB: vượt là BigQuery từ chối, không thể lố free tier
+      maximum_bytes_billed: 1000000000

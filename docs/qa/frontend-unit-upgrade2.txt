@@ -1,0 +1,38 @@
+
+> datae-web@0.1.0 test:unit
+> node --test tests-unit/*.test.js
+
+TAP version 13
+# Subtest: URL filters survive round trip and malformed values are bounded
+ok 1 - URL filters survive round trip and malformed values are bounded
+  ---
+  duration_ms: 3.999643
+  type: 'test'
+  ...
+# Subtest: CSV keeps numbers, zero and missing cells; quotes and formula-like text are escaped
+ok 2 - CSV keeps numbers, zero and missing cells; quotes and formula-like text are escaped
+  ---
+  duration_ms: 0.663161
+  type: 'test'
+  ...
+# Subtest: SSE handles split UTF-8, CRLF, multiline data, comments and multiple frames
+ok 3 - SSE handles split UTF-8, CRLF, multiline data, comments and multiple frames
+  ---
+  duration_ms: 37.113368
+  type: 'test'
+  ...
+# Subtest: SSE surfaces broken JSON, truncated frames, outages and oversize data
+ok 4 - SSE surfaces broken JSON, truncated frames, outages and oversize data
+  ---
+  duration_ms: 8.800458
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 174.028204

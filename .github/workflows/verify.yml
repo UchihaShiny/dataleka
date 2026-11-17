@@ -1,0 +1,28 @@
+name: Verify dataleka locally-equivalent demo
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHON_DOTENV_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+          cache: npm
+          cache-dependency-path: webapp/web/package-lock.json
+      - run: python -m venv .venv
+      - run: .venv/bin/python -m pip install -r requirements.txt
+      - run: .venv/bin/python scripts/test_local.py
+      - run: npm --prefix webapp/web ci
+      - run: npm --prefix webapp/web run build
+      - run: cd webapp/web && npx playwright install --with-deps chromium
+      - run: npm --prefix webapp/web test

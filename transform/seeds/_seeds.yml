@@ -1,0 +1,110 @@
+version: 2
+
+seeds:
+  - name: product_lines
+    description: >
+      Tiền tố SKU (3 chữ đầu) → dòng con (product_subline) và nhóm lớn (product_line).
+      product_line chính vẫn lấy từ productType của Shopify; nhóm lớn ở đây chỉ dùng khi productType trống.
+      source: brief = có trong brief của anh Quang (MHL, SSS, AUX, RGO); title = suy từ tên sản phẩm (11/11, chờ anh duyệt).
+      Tiền tố lẻ (ECU, HTT, DTT, EBU, EBT, AUT, CDP, LNW) và SKU số không có ở đây: dòng con = nhóm lớn.
+      Muốn thêm/sửa: sửa file này (chỉ chữ không dấu) rồi chạy python -m pipelines.dbt build.
+    config:
+      column_types:
+        sku_prefix: string
+        product_subline: string
+        product_line: string
+        source: string
+    columns:
+      - name: sku_prefix
+        description: "3 chữ đầu SKU."
+        data_tests: [unique, not_null]
+      - name: product_subline
+        description: "Dòng con."
+      - name: product_line
+        description: "Nhóm lớn (dùng khi productType trống)."
+      - name: source
+        description: "brief = có trong brief; title = suy từ tên sản phẩm."
+
+  - name: variant_types
+    description: >
+      Giá trị lựa chọn biến thể (selectedOptions) → loại chuẩn hoá. Chỉ các lựa chọn mang nghĩa "loại":
+      Interior Weight (hoodie AUH: thường / lót nỉ / dày), Case Type (ốp TPC: Standard / MagSafe).
+      Shop thêm giá trị mới thì thêm dòng ở đây; giá trị chưa có thì gold ghi '(chưa ánh xạ)' và test cảnh báo.
+    config:
+      column_types:
+        option_name: string
+        option_value: string
+        variant_type: string
+        is_heavyweight: boolean
+        note: string
+    data_tests:
+      - unique:
+          column_name: "concat(option_name, '|', option_value)"
+    columns:
+      - name: option_name
+        description: "Tên lựa chọn (Interior Weight, Case Type)."
+      - name: option_value
+        description: "Giá trị lựa chọn gốc."
+      - name: variant_type
+        description: "Loại chuẩn hoá."
+      - name: is_heavyweight
+        description: "Hoodie dày."
+      - name: note
+        description: "Ghi chú."
+  - name: campaign_types
+    description: >
+      Tuần 3. Product type đọc từ tên campaign Meta → product_line của dim_product (để tính ROAS theo type).
+      Chỉ áp cho tên kiểu MỚI '<Format>-<Đích>_<Type>_<Audience>' (bắt đầu Catalog- hoặc Static-),
+      ví dụ Catalog-PDP_Phone Case_Theme → Phone Case. Kiểu mới chiếm 49,9% spend 9/2026, 98,8% 10/2026, 99,7% 11/2026.
+      Tên kiểu cũ (1–9/2026: Scale:CBO:..._Catalog_ULS, Fishing, Creative) không có type → fct_ad_day ghi
+      '(không theo type)', không đoán (Huy Anh chốt 12/11).
+      Type mới chưa có ở đây → '(chưa gán)' và test cảnh báo. Thêm dòng (chỉ chữ không dấu) rồi dbt build.
+    config:
+      column_types:
+        campaign_type: string
+        product_line: string
+        note: string
+    columns:
+      - name: campaign_type
+        description: "Phần type trong tên campaign kiểu mới (Phone Case, Ornament...)."
+        data_tests: [unique, not_null]
+      - name: product_line
+        description: "Phải trùng một product_line có trong dim_product (test cảnh báo nếu viết lệch, ví dụ Quilt vs Quilt Blanket)."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_line
+              config:
+                severity: warn
+      - name: note
+        description: "Ghi chú."
+
+
+  - name: events
+    description: >
+      Lịch sự kiện (mô hình 8): ngày lễ Mỹ, ngày mua sắm (BFCM), ngày tặng quà. Ngày ở đây vẫn được chấm bất thường
+      nhưng ghi tên sự kiện cạnh báo động, và KHÔNG dùng làm mốc cho ngày khác (mart_anomaly_daily).
+      Chưa có: ngày sale riêng của shop, lịch gửi campaign, hạn giao trước Giáng sinh (hỏi anh Quang).
+      Thêm dòng (chỉ chữ không dấu) rồi chạy python -m pipelines.dbt build.
+    config:
+      column_types:
+        date: date
+        event: string
+        kind: string
+        note: string
+    columns:
+      - name: date
+        description: "Ngày sự kiện."
+        data_tests: [unique, not_null]
+      - name: kind
+        description: "le / mua_sam / tang_qua / sale / campaign."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['le', 'mua_sam', 'tang_qua', 'sale', 'campaign']
+      - name: event
+        description: "Tên sự kiện."
+      - name: note
+        description: "Ghi chú."
